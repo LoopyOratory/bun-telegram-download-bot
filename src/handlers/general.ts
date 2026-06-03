@@ -103,6 +103,8 @@ function buildMenuKeyboard(): InlineKeyboard {
     .text("✅ /pardon", "menu:pardon")
     .text("🔒 /lockup", "menu:lockup").row();
 
+  kb.text("➕ /adduser", "menu:adduser").row();
+
   kb.text("🧹 /sweep", "menu:sweep")
     .text("📋 /log", "menu:log").row();
 
@@ -182,6 +184,12 @@ async function handleMenuCallback(ctx: Context): Promise<void> {
       break;
     case "lockup":
       await ctx.editMessageText(adminService.buildLockup());
+      break;
+    case "adduser":
+      await ctx.editMessageText(
+        "➕ **Add User**\n\nUsage: `/adduser <telegram_id>`\n\nApproves a new user so they can use the bot.\nSend the command directly with the user's ID.",
+        { parse_mode: "Markdown" },
+      );
       break;
     case "sweep":
       const sweepResult = await adminService.sweepTempFiles();
