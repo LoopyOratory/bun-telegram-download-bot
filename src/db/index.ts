@@ -166,6 +166,13 @@ export function unbanUser(telegramId: number): void {
   );
 }
 
+export function approveUserInDb(telegramId: number): void {
+  db.run(
+    "UPDATE users SET is_allowed = 1, updated_at = datetime('now') WHERE telegram_id = ?",
+    telegramId,
+  );
+}
+
 export function setUserAsOwner(telegramId: number): void {
   db.run("UPDATE users SET is_owner = 1 WHERE telegram_id = ?", telegramId);
 }

@@ -104,6 +104,19 @@ export function registerAdminHandlers(bot: Bot): void {
 
   // ─── Moderation ────────────────────────────────────
 
+  bot.command("adduser", async (ctx) => {
+    if (!await requireAdmin(ctx)) return;
+    const id = parseInt(ctx.match);
+    if (!id) {
+      await ctx.reply("Usage: /adduser <telegram_id>");
+      return;
+    }
+    await writeQueue.enqueue(() => adminService.approveUser(id));
+    await ctx.reply(
+      `✅ User approved!\n\nTelegram ID: ${id}\nThey can now use the bot.`,
+    );
+  });
+
   bot.command("quarantine", async (ctx) => {
     if (!await requireAdmin(ctx)) return;
     const [idStr, ...reasonParts] = ctx.match?.split(" ") || [];

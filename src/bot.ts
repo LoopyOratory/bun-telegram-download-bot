@@ -66,6 +66,7 @@ export async function setBotCommands(): Promise<void> {
     { command: "roster", description: "👥 User list" },
     { command: "lookup", description: "🔍 Search for a user" },
     { command: "dossier", description: "📋 Full user deep dive" },
+    { command: "adduser", description: "✅ Approve a new user" },
     { command: "quarantine", description: "🚫 Ban a user" },
     { command: "pardon", description: "✅ Unban a user" },
     { command: "lockup", description: "🔒 List banned users" },

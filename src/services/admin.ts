@@ -332,6 +332,14 @@ export const adminService = {
 
   // ─── Mutations ───────────────────────────────────────
 
+  approveUser(telegramId: number): void {
+    const db = require("../db");
+    // Upsert user with is_allowed=1 (create if doesn't exist)
+    db.upsertUser(telegramId, null, null, null);
+    db.approveUserInDb(telegramId);
+    logger.info({ telegramId }, "User approved via /adduser");
+  },
+
   banUser(telegramId: number, reason: string): void {
     if (telegramId === env.OWNER_ID) {
       throw new Error("Cannot ban the owner");
