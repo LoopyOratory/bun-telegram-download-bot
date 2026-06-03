@@ -1,5 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import type { Bot, Context } from "grammy";
+import { env } from "../config";
 import { adminService } from "../services/admin";
 
 function getStartMessage(ctx: Context): string {
@@ -77,42 +78,47 @@ const ABOUT_MESSAGE = [
 ].join("\n");
 
 /**
- * Build the interactive menu keyboard with all commands grouped by category.
+ * Build the interactive menu keyboard.
+ * Admin sees all commands; regular users see only public commands.
  */
-function buildMenuKeyboard(): InlineKeyboard {
+function buildMenuKeyboard(isAdmin: boolean): InlineKeyboard {
   const kb = new InlineKeyboard();
 
+  // Public — everyone sees these
   kb.text("📹 Download Video", "menu:download_info").row();
-
   kb.text("👋 /start", "menu:start")
     .text("📖 /help", "menu:help")
     .text("ℹ️ /about", "menu:about").row();
 
-  kb.text("📊 /pulse", "menu:pulse")
-    .text("📊 /stats", "menu:stats")
-    .text("📡 /beat", "menu:beat").row();
+  // Admin-only section
+  if (isAdmin) {
+    kb.text("📊 /pulse", "menu:pulse")
+      .text("📊 /stats", "menu:stats")
+      .text("📡 /beat", "menu:beat").row();
 
-  kb.text("🏆 /top", "menu:top")
-    .text("🎬 /genre", "menu:genre").row();
+    kb.text("🏆 /top", "menu:top")
+      .text("🎬 /genre", "menu:genre").row();
 
-  kb.text("👥 /roster", "menu:roster")
-    .text("🔍 /lookup", "menu:lookup")
-    .text("📋 /dossier", "menu:dossier").row();
+    kb.text("👥 /roster", "menu:roster")
+      .text("🔍 /lookup", "menu:lookup")
+      .text("📋 /dossier", "menu:dossier").row();
 
-  kb.text("🚫 /quarantine", "menu:quarantine")
-    .text("✅ /pardon", "menu:pardon")
-    .text("🔒 /lockup", "menu:lockup").row();
+    kb.text("🚫 /quarantine", "menu:quarantine")
+      .text("✅ /pardon", "menu:pardon")
+      .text("🔒 /lockup", "menu:lockup").row();
 
-  kb.text("➕ /adduser", "menu:adduser").row();
+    kb.text("➕ /adduser", "menu:adduser").row();
 
-  kb.text("🧹 /sweep", "menu:sweep")
-    .text("📋 /log", "menu:log").row();
+    kb.text("🧹 /sweep", "menu:sweep")
+      .text("📋 /log", "menu:log").row();
+  }
 
   return kb;
 }
 
 /**
  * Handle menu button callbacks — execute the corresponding command.
+ * Admin commands are blocked for non-admin users.
  */
 async function handleMenuCallback(ctx: Context): Promise<void> {
   const data = ctx.callbackQuery?.data;
@@ -120,6 +126,15 @@ async function handleMenuCallback(ctx: Context): Promise<void> {
 
   await ctx.answerCallbackQuery();
   const cmd = data.replace("menu:", "");
+  const isAdmin = ctx.from?.id === env.OWNER_ID;
+
+  // Admin commands — reject non-admin
+  const adminCmds = ["pulse", "stats", "beat", "top", "genre", "roster", "lookup",
+    "dossier", "quarantine", "pardon", "lockup", "adduser", "sweep", "log"];
+  if (adminCmds.includes(cmd) && !isAdmin) {
+    await ctx.answerCallbackQuery({ text: "⛔ Admin only.", show_alert: true });
+    return;
+  }
 
   // Remove the inline keyboard
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
@@ -215,9 +230,10 @@ export function registerGeneralHandlers(bot: Bot): void {
   });
 
   bot.command("menu", async (ctx) => {
+    const isAdmin = ctx.from?.id === env.OWNER_ID;
     await ctx.reply(
       "📋 **Command Menu**\nTap a button below:",
-      { parse_mode: "Markdown", reply_markup: buildMenuKeyboard() },
+      { parse_mode: "Markdown", reply_markup: buildMenuKeyboard(isAdmin) },
     );
   });
 
