@@ -1,0 +1,40 @@
+# =============================================================================
+# Hermes Video Bot — Docker Compose
+# =============================================================================
+# Usage:
+#   docker compose up -d            # Start in background
+#   docker compose logs -f          # Follow logs
+#   docker compose down             # Stop
+# =============================================================================
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bun-video-bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN:?err}
+      - OWNER_ID=${OWNER_ID:?err}
+      - ALLOWED_USERS=${ALLOWED_USERS:-}
+      - ALLOWED_GROUPS=${ALLOWED_GROUPS:-}
+      - TEMP_DIR=/tmp/bun-video-bot
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DATABASE_PATH=/app/data/bot.db
+      - NODE_ENV=production
+    volumes:
+      - ./data:/app/data
+      - /tmp/bun-video-bot:/tmp/bun-video-bot
+    healthcheck:
+      test: ["CMD-SHELL", "bun --eval \"process.exit(0)\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

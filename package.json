@@ -1,0 +1,31 @@
+{
+  "name": "bun-video-bot",
+  "version": "1.0.0",
+  "description": "Telegram video downloader bot — send any video URL, get the file back",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "build": "bun build src/index.ts --compile --outfile bun-video-bot",
+    "test": "bun test --preload ./tests/setup.ts",
+    "test:watch": "bun test --watch --preload ./tests/setup.ts",
+    "test:coverage": "bun test --coverage --preload ./tests/setup.ts",
+    "typecheck": "bun run tsc --noEmit",
+    "docker:build": "docker build -t bun-video-bot .",
+    "docker:run": "docker compose up -d",
+    "lint": "bun run tsc --noEmit"
+  },
+  "dependencies": {
+    "grammy": "^1.35.0",
+    "zod": "^3.24.0",
+    "pino": "^9.5.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/node": "^22.10.0",
+    "pino-pretty": "^13.0.0",
+    "typescript": "^5.7.0"
+  },
+  "trustedDependencies": []
+}

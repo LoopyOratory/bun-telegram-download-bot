@@ -1,0 +1,20 @@
+# =============================================================================
+# Hermes Video Bot — docker-compose.override.yml (development)
+# =============================================================================
+# This file is automatically used when running `docker compose up` in dev.
+# It overrides the production compose file with dev settings.
+# =============================================================================
+
+services:
+  bot:
+    build:
+      dockerfile: Dockerfile.dev
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./data:/app/data
+    healthcheck:
+      disable: true
