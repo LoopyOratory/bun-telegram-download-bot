@@ -28,19 +28,18 @@ export const tracker = {
     lastName?: string | null,
   ): Promise<number> {
     return writeQueue.enqueue(() => {
-      // Upsert user
+      // Upsert user first — we need the internal ID for the FK
       upsertUser(telegramId, username, firstName, lastName);
+      const user = getUserByTelegramId(telegramId);
+      if (!user) throw new Error("Failed to upsert user");
 
       // Check if owner id and set flag
-      if (telegramId === env.OWNER_ID) {
-        const user = getUserByTelegramId(telegramId);
-        if (user && user.is_owner === 0) {
-          setUserAsOwner(telegramId);
-        }
+      if (telegramId === env.OWNER_ID && user.is_owner === 0) {
+        setUserAsOwner(telegramId);
       }
 
       const platform = detectPlatform(url);
-      return insertDownload(telegramId, chatId, url, platform);
+      return insertDownload(user.id, chatId, url, platform);
     });
   },
 

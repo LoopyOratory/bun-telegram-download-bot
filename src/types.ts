@@ -100,3 +100,11 @@ export class DownloadError extends Error {
     };
   }
 }
+
+/** Available format/resolution for selection */
+export interface FormatInfo {
+  code: string;      // yt-dlp format code (e.g., "136", "137+140")
+  resolution: string; // human-readable (e.g., "1080p", "720p", "480p")
+  height: number;     // pixel height for sorting
+  filesize: string;   // approximate size label (e.g., "~25 MB")
+}

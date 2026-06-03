@@ -15,6 +15,7 @@ import {
   DownloadErrorCode,
   type ProgressEvent,
   type DownloadResult,
+  type FormatInfo,
 } from "../types";
 
 /** Regex to parse yt-dlp progress line */
@@ -30,16 +31,18 @@ interface SpawnOptions {
 /**
  * Build yt-dlp arguments for a given platform.
  */
-function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions): string[] {
+function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions, formatCode?: string): string[] {
+  const fmt = formatCode || "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best";
   const args = [
     url,
-    "-f", "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",
+    "-f", fmt,
     "-o", outputPath,
     "--no-playlist",
     "--no-cache-dir",
     "--newline",
     "--max-filesize", `${env.MAX_FILE_SIZE_MB}M`,
     "--no-warnings",
+    "--merge-output-format", "mp4",
   ];
 
   // Platform-specific args
@@ -116,6 +119,7 @@ export async function downloadVideo(
   outputDir: string,
   onProgress?: (event: ProgressEvent) => void,
   retryCount = 0,
+  formatCode?: string,
 ): Promise<DownloadResult> {
   const platform = detectPlatform(url);
   const videoId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -125,9 +129,9 @@ export async function downloadVideo(
   // Ensure temp directory exists (mkdir is Bun-compatible via node:fs/promises)
   await mkdir(outputDir, { recursive: true });
 
-  const args = buildYtDlpArgs({ url, outputPath, platform });
+  const args = buildYtDlpArgs({ url, outputPath, platform }, formatCode);
 
-  logger.info({ url: url.slice(0, 100), platform, outputPath, retryCount }, "Starting download");
+  logger.info({ url: url.slice(0, 100), platform, outputPath, retryCount, formatCode }, "Starting download");
 
   return new Promise<DownloadResult>((resolve, reject) => {
     const proc = spawn(["yt-dlp", ...args], {
@@ -201,7 +205,7 @@ export async function downloadVideo(
           logger.info({ retryCount, delay }, "Retrying download");
           await sleep(delay);
           try {
-            const result = await downloadVideo(url, outputDir, onProgress, retryCount + 1);
+            const result = await downloadVideo(url, outputDir, onProgress, retryCount + 1, formatCode);
             resolve(result);
             return;
           } catch (retryErr) {
@@ -214,10 +218,29 @@ export async function downloadVideo(
         return;
       }
 
-      // Success — verify the file with Bun-native API
-      const filePath = outputPath;
-      const bunFile = Bun.file(filePath);
-      const fileExists = await bunFile.exists();
+      // Success — verify the file with Bun-native API.
+      // yt-dlp may append extensions when merging (e.g., .mkv), so search for the actual file.
+      let filePath = outputPath;
+      let bunFile = Bun.file(filePath);
+      let fileExists = await bunFile.exists();
+
+      if (!fileExists) {
+        // Search for any file starting with our output path prefix
+        const { readdir } = await import("node:fs/promises");
+        try {
+          const dir = outputPath.substring(0, outputPath.lastIndexOf("/"));
+          const prefix = outputPath.substring(outputPath.lastIndexOf("/") + 1);
+          const files = await readdir(dir);
+          const match = files.find(f => f.startsWith(prefix));
+          if (match) {
+            filePath = `${dir}/${match}`;
+            bunFile = Bun.file(filePath);
+            fileExists = true;
+            logger.info({ expectedPath: outputPath, actualPath: filePath }, "Found merged output file");
+          }
+        } catch {}
+      }
+
       if (!fileExists) {
         reject(new DownloadError(DownloadErrorCode.UNKNOWN, "File not found after download completed"));
         return;
@@ -253,4 +276,139 @@ export async function downloadVideo(
       });
     }).catch(reject);
   });
+}
+
+/**
+ * List available formats for a URL using yt-dlp -F.
+ * Returns unique resolutions up to 1080p with their format codes.
+ */
+export async function listFormats(url: string): Promise<FormatInfo[]> {
+  const platform = detectPlatform(url);
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(["yt-dlp", "-F", url, "--no-playlist", "--no-cache-dir", "--no-warnings"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const chunks: string[] = [];
+    const stdoutReader = proc.stdout.getReader();
+
+    const readStdout = async () => {
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await stdoutReader.read();
+        if (done) break;
+        chunks.push(decoder.decode(value, { stream: true }));
+      }
+    };
+
+    readStdout().then(async () => {
+      const exitCode = await proc.exited;
+      const output = chunks.join("");
+
+      if (exitCode !== 0 || !output.includes("Available formats")) {
+        // No format listing available — return empty so caller falls back to best
+        resolve([]);
+        return;
+      }
+
+      const formats = parseFormats(output, platform);
+      resolve(formats);
+    }).catch(() => resolve([]));
+  });
+}
+
+/** Regex to parse yt-dlp -F table rows */
+const FORMAT_LINE_REGEX = /^(\S+)\s+(\S+)\s+(\S+)\s+/;
+
+/**
+ * Parse yt-dlp -F output into a deduplicated list of resolutions ≤ 1080p.
+ */
+function parseFormats(output: string, platform: string): FormatInfo[] {
+  const lines = output.split("\n");
+  const seen = new Map<number, FormatInfo>();
+
+  // Start parsing after the header line
+  let pastHeader = false;
+  for (const line of lines) {
+    if (!pastHeader) {
+      if (line.includes("---")) pastHeader = true;
+      continue;
+    }
+
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Parse the format line — extract ID, EXT, and RESOLUTION
+    const fields = trimmed.split(/\s+/);
+    if (fields.length < 3) continue;
+
+    const code = fields[0];
+    const ext = fields[1];
+
+    // Skip non-video formats
+    if (code === "ID" || code.startsWith("sb")) continue;
+    if (ext === "mhtml" || ext === "m4a") continue;
+    if (trimmed.includes("audio only")) continue;
+    if (trimmed.includes("images")) continue;
+    if (trimmed.includes("watermarked")) continue; // TikTok watermarked version
+
+    // Extract resolution
+    let height = 0;
+    let label = "";
+
+    // Try to parse resolution from format line like "1920x1080" or "576x1024"
+    const resMatch = trimmed.match(/(\d+)x(\d+)/);
+    if (resMatch) {
+      const w = parseInt(resMatch[1]);
+      const h = parseInt(resMatch[2]);
+      height = h;
+    }
+
+    // Also check for trailing resolution like "1080p" or "720p"
+    const pMatch = trimmed.match(/(\d+)p\b/);
+    if (pMatch) {
+      const p = parseInt(pMatch[1]);
+      if (!height) height = p;
+      label = `${p}p`;
+    }
+
+    // Skip if no resolution found or height > 1080
+    if (!height || height > 1080) continue;
+
+    // Build label
+    if (!label) {
+      if (height === 1080) label = "1080p";
+      else if (height >= 720) label = "720p";
+      else if (height >= 480) label = "480p";
+      else if (height >= 360) label = "360p";
+      else label = `${height}p`;
+    }
+
+    // Prefer mp4 over webm, prefer combined (audio+video) for YouTube
+    const existing = seen.get(height);
+    const isYoutube = platform === "youtube";
+    const hasAudio = isYoutube && ext === "mp4" && fields.length > 8 && fields[5] === "2";
+    const isMp4 = ext === "mp4";
+
+    if (!existing || (isMp4 && existing.code.includes("webm")) || (hasAudio && !existing.code.includes("+"))) {
+      // Only append +bestaudio for YouTube video-only formats. TikTok/Instagram/etc already include audio.
+      const formatCode = hasAudio ? code : (isYoutube ? `${code}+bestaudio` : code);
+      seen.set(height, {
+        code: formatCode,
+        resolution: label,
+        height,
+        filesize: "",
+      });
+    }
+  }
+
+  // Sort by height descending, take unique resolutions
+  const formats = Array.from(seen.values())
+    .sort((a, b) => b.height - a.height)
+    .filter((f, i, arr) => arr.findIndex(x => x.height === f.height) === i);
+
+  // Limit to max 6 options
+  return formats.slice(0, 6);
 }

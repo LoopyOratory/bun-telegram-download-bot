@@ -41,6 +41,37 @@ export function createBot(): Bot {
 }
 
 /**
+ * Register bot commands with Telegram so they appear in the / menu.
+ * Call after bot.start() resolves.
+ */
+export async function setBotCommands(): Promise<void> {
+  if (!bot) throw new Error("Bot not initialised — call createBot() first");
+
+  await bot.api.setMyCommands([
+    { command: "menu", description: "📋 Interactive command menu" },
+    { command: "start", description: "👋 Welcome message" },
+    { command: "help", description: "📖 Supported platforms and usage" },
+    { command: "about", description: "ℹ️ Bot info and tech stack" },
+    { command: "panel", description: "👑 Admin command centre" },
+    { command: "pulse", description: "💓 Bot health and uptime" },
+    { command: "stats", description: "📊 Full bot statistics" },
+    { command: "beat", description: "📡 Live activity feed" },
+    { command: "top", description: "🏆 Top downloaders" },
+    { command: "genre", description: "🎬 Platform breakdown" },
+    { command: "roster", description: "👥 User list" },
+    { command: "lookup", description: "🔍 Search for a user" },
+    { command: "dossier", description: "📋 Full user deep dive" },
+    { command: "quarantine", description: "🚫 Ban a user" },
+    { command: "pardon", description: "✅ Unban a user" },
+    { command: "lockup", description: "🔒 List banned users" },
+    { command: "sweep", description: "🧹 Clean temp files" },
+    { command: "log", description: "📋 View error logs" },
+  ]);
+
+  logger.info("Bot commands registered with Telegram");
+}
+
+/**
  * Get the bot instance. Throws if not yet created.
  */
 export function getBot(): Bot {

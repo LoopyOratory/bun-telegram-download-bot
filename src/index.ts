@@ -1,4 +1,4 @@
-import { createBot } from "./bot";
+import { createBot, setBotCommands } from "./bot";
 import { initDatabase } from "./db";
 import { env } from "./config";
 import { logger } from "./utils/logger";
@@ -38,7 +38,10 @@ async function main(): Promise<void> {
   // 5. Register shutdown handlers
   registerShutdownHandlers();
 
-  // 6. Start polling
+  // 6. Register commands with Telegram (shows in / menu)
+  await setBotCommands();
+
+  // 7. Start polling
   logger.info("Starting bot polling...");
   await bot.start({
     onStart: (botInfo) => {
