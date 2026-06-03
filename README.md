@@ -55,10 +55,10 @@ Edit `.env` with your credentials:
 
 ```env
 BOT_TOKEN=61164694...r   # from @BotFather
-OWNER_ID=5312645032      # your Telegram user ID
+OWNER_ID=531264503     # your Telegram user ID
 
 # Optional — restrict who can use the bot
-ALLOWED_USERS=5312645032,987654321
+ALLOWED_USERS=531264503,987654321
 ALLOWED_GROUPS=-1001234567890
 ```
 
