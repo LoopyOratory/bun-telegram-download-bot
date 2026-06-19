@@ -28,7 +28,7 @@
 - **🛡️ Authorized Access** — configurable allowlists for users and groups; banned users are silently dropped
 - **📊 Admin Dashboard** — 14 admin commands for stats, user management, moderation, and system maintenance
 - **🔥 Retry Logic** — automatic retries with exponential backoff for transient failures (timeouts, rate limits)
-- **🔌 Smart Proxy** — three-tier proxy system: manual `PROXY_URL` → auto-discovered free proxy pool → Tor fallback. Rotates on failure.
+- **🔌 Smart Proxy** — three-tier proxy system for YouTube only (other sites download direct). Proxies are speed-tested and sorted by latency; fastest is always used. Auto-rotates on failure.
 - **📈 Progress Tracking** — real-time download progress with animated status bar
 - **🐳 Docker Ready** — multi-stage Dockerfile with healthcheck and docker-compose for one-command deployment
 - **⚡ Bun Native** — built on Bun's zero-config runtime: SQLite, test runner, package manager — all built in
@@ -123,8 +123,8 @@ https://www.tiktok.com/@user/video/123456789
 User sends URL
   → Auth middleware (check ALLOWED_USERS/GROUPS + ban list)
   → Rate limiter (1 concurrent, 10s cooldown)
-  → Proxy resolution: PROXY_URL → auto-pool → Tor → direct
-  → yt-dlp download (--proxy or --tor, Bun.spawn, no shell injection)
+  → Proxy resolution (YouTube only): PROXY_URL → speed-tested pool (fastest first) → Tor → direct
+  → yt-dlp download (--proxy or --tor or direct; Bun.spawn, no shell injection)
   → Progress bar (live Telegram message edits, 2s throttle)
   → sendVideo (file uploaded to Telegram)
   → immediately unlink(filePath) — file gone
@@ -150,7 +150,7 @@ src/
 │   └── logger.ts       # Request logging with latency
 ├── services/
 │   ├── downloader.ts   # yt-dlp wrapper with progress + retry
-│   ├── proxy.ts        # Proxy pool (free list + Tor fallback)
+│   ├── proxy.ts        # Speed-tested proxy pool (fastest first) + Tor fallback
 │   ├── tracker.ts      # Download audit logging
 │   └── admin.ts        # Formatted admin responses
 ├── handlers/
@@ -176,9 +176,9 @@ src/
 | `ALLOWED_GROUPS` | `""` | Comma-separated group IDs (negative) |
 | `MAX_FILE_SIZE_MB` | `50` | Maximum download size in megabytes |
 | `LOG_LEVEL` | `info` | Pino log level (trace → fatal) |
-| `PROXY_URL` | `""` | Manual proxy (takes priority). Supports http://, https://, socks5:// |
-| `PROXY_ENABLED` | `true` | Enable auto-discovered free proxy pool from iplocate/free-proxy-list |
-| `TOR_ENABLED` | `true` | Enable Tor fallback when no proxies available (requires tor package) |
+| `PROXY_URL` | `""` | Manual proxy (takes priority, YouTube only). Supports http://, https://, socks5:// |
+| `PROXY_ENABLED` | `true` | Enable proxy pool (YouTube only). Proxies speed-tested, fastest used first |
+| `TOR_ENABLED` | `true` | Enable Tor fallback when pool empty (YouTube only, requires tor package) |
 | `TEMP_DIR` | `/tmp/bun-video-bot` | Temporary download directory |
 | `DATABASE_PATH` | `./data/bot.db` | SQLite database location |
 | `NODE_ENV` | `development` | Environment (development/production/test) |
