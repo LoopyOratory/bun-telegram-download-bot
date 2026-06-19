@@ -1,3 +1,4 @@
+import { GrammyError } from "grammy";
 import { createBot, setBotCommands } from "./bot";
 import { initDatabase } from "./db";
 import { env } from "./config";
@@ -45,20 +46,33 @@ async function main(): Promise<void> {
   // 6. Register commands with Telegram (shows in / menu)
   await setBotCommands();
 
-  // 7. Start polling
+  // 7. Start polling with retry on 409 Conflict
   logger.info("Starting bot polling...");
-  await bot.start({
-    onStart: (botInfo) => {
-      logger.info(
-        {
-          username: botInfo.username,
-          id: botInfo.id,
+  const MAX_START_RETRIES = 10;
+  const START_RETRY_BASE_MS = 5_000; // 5s initial backoff
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await bot.start({
+        onStart: (botInfo) => {
+          logger.info(
+            { username: botInfo.username, id: botInfo.id },
+            `Bot @${botInfo.username} is online`,
+          );
         },
-        `Bot @${botInfo.username} is online`,
+        drop_pending_updates: true,
+      });
+      return; // started successfully
+    } catch (err) {
+      const is409 = err instanceof GrammyError && err.error_code === 409;
+      if (!is409 || attempt >= MAX_START_RETRIES - 1) throw err;
+      const delay = START_RETRY_BASE_MS * Math.pow(2, attempt);
+      logger.warn(
+        { attempt: attempt + 1, maxRetries: MAX_START_RETRIES, delayMs: delay },
+        "409 Conflict detected — old container still polling. Retrying...",
       );
-    },
-    drop_pending_updates: true,
-  });
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
 }
 
 main().catch((err) => {
