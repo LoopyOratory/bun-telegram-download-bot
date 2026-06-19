@@ -53,7 +53,7 @@ export async function handleDownload(ctx: Context): Promise<void> {
   // Short-form platforms (TikTok, Instagram, Snapchat) — skip format listing,
   // download immediately. Their -F often fails and they have limited resolutions anyway.
   if (platform === "tiktok" || platform === "instagram" || platform === "snapchat") {
-    const statusMsg = await ctx.reply("⏬ Downloading (best quality)...");
+    const statusMsg = await ctx.reply("📥 Downloading (best quality)...");
     await doDownload(ctx, cleanedUrl, userId, chatId, statusMsg.message_id);
     return;
   }
@@ -66,7 +66,7 @@ export async function handleDownload(ctx: Context): Promise<void> {
 
   if (formats.length === 0) {
     // No format listing available — download immediately with best quality
-    await ctx.api.editMessageText(chatId, statusMsg.message_id, "⏬ Downloading (best quality)...");
+    await ctx.api.editMessageText(chatId, statusMsg.message_id, "📥 Downloading (best quality)...");
     await doDownload(ctx, cleanedUrl, userId, chatId, statusMsg.message_id);
     return;
   }
@@ -145,12 +145,13 @@ async function doDownload(
       formatCode,
     );
 
-    await ctx.api.editMessageText(chatId, statusMsgId, "✅ Processing...");
+    await ctx.api.editMessageText(chatId, statusMsgId, "🧩 Merging streams...");
+    await ctx.api.editMessageText(chatId, statusMsgId, "📤 Uploading to Telegram...");
     await ctx.api.sendVideo(chatId, new InputFile(result.filePath), {
       supports_streaming: true,
     });
 
-    await ctx.api.editMessageText(chatId, statusMsgId, "✅ Downloaded!");
+    await ctx.api.editMessageText(chatId, statusMsgId, "✅ Done!");
     await tracker.trackComplete(downloadId, result.fileSize, result.format, userId);
   } catch (err) {
     const downloadErr =
@@ -209,7 +210,7 @@ export async function handleResolutionCallback(ctx: Context): Promise<void> {
   await ctx.api.editMessageText(
     chatId,
     statusMsgId,
-    `⏬ Downloading (${formatCode === "best" ? "best quality" : formatCode})...`,
+    `📥 Downloading (${formatCode === "best" ? "best quality" : formatCode})...`,
   );
 
   // Clone context-like behaviour — use the chatId from the pending selection

@@ -71,15 +71,18 @@ Polling mode only.* No HTTP server — grammy's `bot.start()` keeps a long-lived
   → auth middleware: check ALLOWED_USERS/GROUPS + DB ban status
   → ratelimit middleware: 1 concurrent download, 10s cooldown
   → download handler: validate URL → upsert user → insert download record
-  → Send "⏬ Starting download..." status message
   → Bun.spawn(["yt-dlp", "--newline", ...]) — capture stderr for progress
-  → Parse progress % from stderr, edit status message (throttled ~2s)
-  → On 100%: queue write completed, edit "✅ Processing..."
+  → Parse progress % from stderr, edit status message (throttled ~2s):
+       ⠋ 📥 Downloading 45.2%
+       ▰▰▰▰▰▱▱▱▱▱
+       ⚡ 2.5MiB/s  ⏱ 0:45
+  → On 100%: edit "🧩 Merging streams..."
+  → Immediately after: edit "📤 Uploading to Telegram..."
   → bot.api.sendVideo(chatId, InputFile(readable))
-  → Edit status: "✅ Downloaded!"
+  → Edit status: "✅ Done!"
   → Immediately delete file from disk: await fs.unlink(filePath)
   → Queue write: update DB (status=completed, file_size, duration)
-  → On error: queue write status=failed, edit "❌ Error: [reason]"
+  → On error: queue write status=failed, edit "❌ [minimal message]"
      → Also delete partial/zero-byte file if it exists
 
 Admin sends any command → adminOnly guard checks OWNER_ID → handler runs
@@ -775,7 +778,7 @@ yt-dlp outputs progress to **stderr** with `--newline`. Each line:
 
 [download]  45.3% of ~15.44MiB at 2.34MiB/s ETA 00:03
 
-**States:** ⏬ Starting → ▰▰▰▰▱▱▱▱ (45%) ... → ✅ Processing → ✅ Sent! → ❌ Error
+**States:** 📥 Starting → ▰▰▰▰▱▱▱▱ (45%) ... → 🧩 Merging → 📤 Uploading → ✅ Done! → ❌ Error
 
 **Progress bar renderer (progress.ts):**
 
@@ -872,7 +875,41 @@ typescript
 - `Bun.spawn` with array args only
 
  (8/9)
-[03/06/2026 02:46] eko-herm: ## Logging
+[03/06/2026 02:46] eko-herm: ## Format Parsing Fix (parseFormats)
+
+Two critical bugs were fixed in `parseFormats()`:
+
+1. **Header detection** — was looking for `---` separator in yt-dlp `-F` output. Modern yt-dlp may not output this (or uses Unicode box-drawing chars). Fixed to detect the `"Available formats"` line instead, which is version-agnostic.
+
+2. **hasAudio detection** — was checking `fields[5] === "2"` (column is bitrate/TBR, never `"2"`). Changed to `!trimmed.includes("video only")` — combined formats have an audio codec in the ACODEC column, video-only DASH formats say `"video only"`.
+
+3. **Dedup priority** — combined formats (e.g., format 22 at 720p) now correctly replace video-only DASH formats at the same resolution instead of being discarded.
+
+4. **Logging** — warns when `listFormats` returns empty (visible in container logs for debugging).
+
+## User-Facing Message Flow (Set D emojis)
+
+The following emoji pipeline appears in Telegram:
+
+```
+🔍 Checking available resolutions...    ← formats being fetched
+🎬 Select resolution for:                ← user picks quality
+📥 Downloading (720p)...                 ← download starts
+│  ⠋ 📥 Downloading 45.2%               ← animated progress bar
+│  ▰▰▰▰▰▱▱▱▱▱                           ← (live updates)
+│  ⚡ 2.5MiB/s  ⏱ 0:45
+│
+🧩 Merging streams...                    ← post-download merge
+📤 Uploading to Telegram...              ← sending video
+✅ Done!                                 ← complete
+
+❌ Video is private                      ← minimal errors (no stderr leak)
+❌ Download failed
+```
+
+Error messages are kept minimal — full stderr/exit code is logged server-side but user only sees a short reason (e.g. `"Video is private"`, `"Rate limited, try again later"`, `"Download failed"`).
+
+## Logging
 
 typescript
 import pino from "pino"

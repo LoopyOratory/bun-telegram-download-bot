@@ -85,28 +85,28 @@ function classifyYtDlpError(stderr: string): DownloadError {
   const combined = stderr.toLowerCase();
 
   if (combined.includes("private video") || combined.includes("private")) {
-    return new DownloadError(DownloadErrorCode.PRIVATE_VIDEO, "This video is private or unavailable");
+    return new DownloadError(DownloadErrorCode.PRIVATE_VIDEO, "Video is private");
   }
   if (combined.includes("copyright") || combined.includes("blocked") || combined.includes("removed")) {
-    return new DownloadError(DownloadErrorCode.PLATFORM_BLOCKED, "Content blocked or removed by platform");
+    return new DownloadError(DownloadErrorCode.PLATFORM_BLOCKED, "Content blocked by platform");
   }
   if (combined.includes("geo") || combined.includes("not available in your country")) {
-    return new DownloadError(DownloadErrorCode.GEO_RESTRICTED, "Video is geo-restricted");
+    return new DownloadError(DownloadErrorCode.GEO_RESTRICTED, "Not available in your region");
   }
   if (combined.includes("rate") || combined.includes("too many requests")) {
-    return new DownloadError(DownloadErrorCode.RATE_LIMITED, "Rate limited by platform");
+    return new DownloadError(DownloadErrorCode.RATE_LIMITED, "Rate limited, try again later");
   }
   if (combined.includes("timed out") || combined.includes("timeout")) {
     return new DownloadError(DownloadErrorCode.TIMEOUT, "Download timed out");
   }
   if (combined.includes("watermark")) {
-    return new DownloadError(DownloadErrorCode.WATERMARK_DETECTED, "Video contains watermark — download rejected");
+    return new DownloadError(DownloadErrorCode.WATERMARK_DETECTED, "Video contains watermark");
   }
   if (combined.includes("unsupported url") || combined.includes("no video") || combined.includes("no data")) {
-    return new DownloadError(DownloadErrorCode.EXTRACTOR_ERROR, "yt-dlp could not extract video: " + stderr.split("\n")[0].trim());
+    return new DownloadError(DownloadErrorCode.EXTRACTOR_ERROR, "Could not extract video info");
   }
 
-  return new DownloadError(DownloadErrorCode.UNKNOWN, stderr.split("\n").slice(0, 3).join("; ").trim());
+  return new DownloadError(DownloadErrorCode.UNKNOWN, "Download failed");
 }
 
 /**
@@ -332,7 +332,11 @@ export async function listFormats(url: string): Promise<FormatInfo[]> {
       const output = chunks.join("");
 
       if (exitCode !== 0 || !output.includes("Available formats")) {
-        // No format listing available — return empty so caller falls back to best
+        if (exitCode !== 0) {
+          logger.warn({ url: url.slice(0, 100), exitCode }, "listFormats: yt-dlp exited with non-zero code");
+        } else {
+          logger.warn({ url: url.slice(0, 100) }, "listFormats: output missing 'Available formats' marker");
+        }
         resolve([]);
         return;
       }
@@ -342,9 +346,6 @@ export async function listFormats(url: string): Promise<FormatInfo[]> {
     }).catch(() => resolve([]));
   });
 }
-
-/** Regex to parse yt-dlp -F table rows */
-const FORMAT_LINE_REGEX = /^(\S+)\s+(\S+)\s+(\S+)\s+/;
 
 /**
  * Parse yt-dlp -F output into a deduplicated list of resolutions ≤ 1080p.
@@ -357,7 +358,7 @@ function parseFormats(output: string, platform: string): FormatInfo[] {
   let pastHeader = false;
   for (const line of lines) {
     if (!pastHeader) {
-      if (line.includes("---")) pastHeader = true;
+      if (line.includes("Available formats")) pastHeader = true;
       continue;
     }
 
@@ -413,10 +414,10 @@ function parseFormats(output: string, platform: string): FormatInfo[] {
     // Prefer mp4 over webm, prefer combined (audio+video) for YouTube
     const existing = seen.get(height);
     const isYoutube = platform === "youtube";
-    const hasAudio = isYoutube && ext === "mp4" && fields.length > 8 && fields[5] === "2";
+    const hasAudio = isYoutube && ext === "mp4" && !trimmed.includes("video only");
     const isMp4 = ext === "mp4";
 
-    if (!existing || (isMp4 && existing.code.includes("webm")) || (hasAudio && !existing.code.includes("+"))) {
+    if (!existing || (isMp4 && existing.code.includes("webm")) || (hasAudio && existing.code.includes("+"))) {
       // Only append +bestaudio for YouTube video-only formats. TikTok/Instagram/etc already include audio.
       const formatCode = hasAudio ? code : (isYoutube ? `${code}+bestaudio` : code);
       seen.set(height, {
