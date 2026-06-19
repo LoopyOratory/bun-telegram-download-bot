@@ -664,18 +664,19 @@ initProxyPool() called on startup
   → if PROXY_URL is set → skip pool (manual mode)
   → if PROXY_ENABLED=false → skip pool
   → fetch list from GitHub raw (all-proxies.txt)
-  → shuffle, test batches of 30 in parallel against Google (5s timeout)
-  → keep up to 10 working proxies in memory
+  → test batches of 30 in parallel against Google (5s timeout), measure latency (Date.now())
+  → sort working proxies by latency (fastest first)
+  → keep up to 10 fastest proxies in memory
   → refresh pool every 10 minutes in background
 
 getProxy() called per download
   → return PROXY_URL if set (manual)
-  → return round-robin proxy from pool
+  → return proxyPool[0] (fastest available)
   → return null if pool empty (caller falls back to Tor)
 
 reportFailure(proxy) called on download error
-  → remove failing proxy from pool
-  → next retry picks a different proxy
+  → remove failing proxy from pool (splice via indexOf)
+  → next call picks the new fastest (index 0)
 ```
 
 ### Configuration
