@@ -415,6 +415,7 @@ function parseFormats(output: string, platform: string): FormatInfo[] {
     // Skip non-video formats
     if (code === "ID" || code.startsWith("sb")) continue;
     if (ext === "mhtml" || ext === "m4a") continue;
+    if (ext === "webm") continue; // webm/VP9 can't merge into MP4
     if (trimmed.includes("audio only")) continue;
     if (trimmed.includes("images")) continue;
     if (trimmed.includes("watermarked")) continue; // TikTok watermarked version
@@ -451,14 +452,13 @@ function parseFormats(output: string, platform: string): FormatInfo[] {
       else label = `${height}p`;
     }
 
-    // Prefer mp4 over webm, prefer combined (audio+video) for YouTube
+    // Prefer combined (audio+video) over merged DASH formats for YouTube
     const existing = seen.get(height);
     const isYoutube = platform === "youtube";
     const hasAudio = isYoutube && ext === "mp4" && !trimmed.includes("video only");
-    const isMp4 = ext === "mp4";
 
-    if (!existing || (isMp4 && existing.code.includes("webm")) || (hasAudio && existing.code.includes("+"))) {
-      // Only append +bestaudio for YouTube video-only formats. TikTok/Instagram/etc already include audio.
+    if (!existing || (hasAudio && existing.code.includes("+"))) {
+      // Only append +bestaudio[ext=m4a] for YouTube video-only formats. TikTok/Instagram/etc already include audio.
       const formatCode = hasAudio ? code : (isYoutube ? `${code}+bestaudio[ext=m4a]` : code);
       seen.set(height, {
         code: formatCode,
