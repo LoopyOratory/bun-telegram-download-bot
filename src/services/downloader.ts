@@ -47,6 +47,7 @@ function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions, formatCode?
     "--newline",
     "--max-filesize", `${env.MAX_FILE_SIZE_MB}M`,
     "--no-warnings",
+    "--remux-video", "mp4",
   ];
 
   // Platform-specific args
