@@ -459,7 +459,7 @@ function parseFormats(output: string, platform: string): FormatInfo[] {
 
     if (!existing || (isMp4 && existing.code.includes("webm")) || (hasAudio && existing.code.includes("+"))) {
       // Only append +bestaudio for YouTube video-only formats. TikTok/Instagram/etc already include audio.
-      const formatCode = hasAudio ? code : (isYoutube ? `${code}+bestaudio` : code);
+      const formatCode = hasAudio ? code : (isYoutube ? `${code}+bestaudio[ext=m4a]` : code);
       seen.set(height, {
         code: formatCode,
         resolution: label,
