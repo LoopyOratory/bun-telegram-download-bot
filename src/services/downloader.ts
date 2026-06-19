@@ -10,6 +10,7 @@ import {
   RETRY_DELAY_BASE_MS,
 } from "../utils/limits";
 import { detectPlatform } from "../utils/url";
+import { getProxy, reportFailure, getTorArgs, isTorAvailable } from "./proxy";
 import {
   DownloadError,
   DownloadErrorCode,
@@ -48,6 +49,14 @@ function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions, formatCode?
   // Platform-specific args
   if (platform === "tiktok") {
     args.push("--extractor-args", "tiktok:no_watermark=true");
+  }
+
+  // Proxy args
+  const proxy = getProxy();
+  if (proxy) {
+    args.push("--proxy", proxy);
+  } else if (isTorAvailable()) {
+    args.push(...getTorArgs());
   }
 
   return args;
@@ -194,15 +203,22 @@ export async function downloadVideo(
           "Download failed",
         );
 
-        // Retry logic for transient errors
+        // Retry logic for transient errors (with proxy rotation)
         if (
           retryCount < MAX_DOWNLOAD_RETRIES &&
           (error.code === DownloadErrorCode.TIMEOUT ||
            error.code === DownloadErrorCode.RATE_LIMITED ||
+           error.code === DownloadErrorCode.PLATFORM_BLOCKED ||
            error.code === DownloadErrorCode.UNKNOWN)
         ) {
+          // Report current proxy failure to cycle it
+          const currentProxy = getProxy();
+          if (currentProxy) {
+            reportFailure(currentProxy);
+          }
+
           const delay = RETRY_DELAY_BASE_MS * Math.pow(2, retryCount);
-          logger.info({ retryCount, delay }, "Retrying download");
+          logger.info({ retryCount, delay, proxyFailure: !!currentProxy }, "Retrying download");
           await sleep(delay);
           try {
             const result = await downloadVideo(url, outputDir, onProgress, retryCount + 1, formatCode);
@@ -286,7 +302,15 @@ export async function listFormats(url: string): Promise<FormatInfo[]> {
   const platform = detectPlatform(url);
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(["yt-dlp", "-F", url, "--no-playlist", "--no-cache-dir", "--no-warnings"], {
+    const formatArgs = ["-F", url, "--no-playlist", "--no-cache-dir", "--no-warnings"];
+    const proxy = getProxy();
+    if (proxy) {
+      formatArgs.push("--proxy", proxy);
+    } else if (isTorAvailable()) {
+      formatArgs.push(...getTorArgs());
+    }
+
+    const proc = spawn(["yt-dlp", ...formatArgs], {
       stdout: "pipe",
       stderr: "pipe",
     });

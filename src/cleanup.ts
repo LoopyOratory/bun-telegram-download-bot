@@ -1,6 +1,7 @@
 import { readdir, unlink } from "node:fs/promises";
 import { env } from "./config";
 import { logger } from "./utils/logger";
+import { shutdown as shutdownProxy } from "./services/proxy";
 
 /**
  * Cleanup a single file after sendVideo completes.
@@ -53,6 +54,7 @@ export async function cleanupOrphans(): Promise<void> {
 export function registerShutdownHandlers(): void {
   const cleanup = async () => {
     logger.info("Shutting down...");
+    shutdownProxy();
     await cleanupOrphans();
     process.exit(0);
   };

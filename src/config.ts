@@ -33,6 +33,18 @@ export const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),
+
+  PROXY_URL: z.string().optional(),
+
+  PROXY_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => v === "true" || v === "1"),
+
+  TOR_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => v === "true" || v === "1"),
 });
 
 /** Parsed environment configuration — fails fast at startup if invalid */

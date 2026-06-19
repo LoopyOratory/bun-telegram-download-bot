@@ -28,6 +28,7 @@
 - **🛡️ Authorized Access** — configurable allowlists for users and groups; banned users are silently dropped
 - **📊 Admin Dashboard** — 14 admin commands for stats, user management, moderation, and system maintenance
 - **🔥 Retry Logic** — automatic retries with exponential backoff for transient failures (timeouts, rate limits)
+- **🔌 Smart Proxy** — three-tier proxy system: manual `PROXY_URL` → auto-discovered free proxy pool → Tor fallback. Rotates on failure.
 - **📈 Progress Tracking** — real-time download progress with animated status bar
 - **🐳 Docker Ready** — multi-stage Dockerfile with healthcheck and docker-compose for one-command deployment
 - **⚡ Bun Native** — built on Bun's zero-config runtime: SQLite, test runner, package manager — all built in
@@ -122,7 +123,8 @@ https://www.tiktok.com/@user/video/123456789
 User sends URL
   → Auth middleware (check ALLOWED_USERS/GROUPS + ban list)
   → Rate limiter (1 concurrent, 10s cooldown)
-  → yt-dlp download (Bun.spawn with array args — no shell injection)
+  → Proxy resolution: PROXY_URL → auto-pool → Tor → direct
+  → yt-dlp download (--proxy or --tor, Bun.spawn, no shell injection)
   → Progress bar (live Telegram message edits, 2s throttle)
   → sendVideo (file uploaded to Telegram)
   → immediately unlink(filePath) — file gone
@@ -148,6 +150,7 @@ src/
 │   └── logger.ts       # Request logging with latency
 ├── services/
 │   ├── downloader.ts   # yt-dlp wrapper with progress + retry
+│   ├── proxy.ts        # Proxy pool (free list + Tor fallback)
 │   ├── tracker.ts      # Download audit logging
 │   └── admin.ts        # Formatted admin responses
 ├── handlers/
@@ -173,6 +176,9 @@ src/
 | `ALLOWED_GROUPS` | `""` | Comma-separated group IDs (negative) |
 | `MAX_FILE_SIZE_MB` | `50` | Maximum download size in megabytes |
 | `LOG_LEVEL` | `info` | Pino log level (trace → fatal) |
+| `PROXY_URL` | `""` | Manual proxy (takes priority). Supports http://, https://, socks5:// |
+| `PROXY_ENABLED` | `true` | Enable auto-discovered free proxy pool from iplocate/free-proxy-list |
+| `TOR_ENABLED` | `true` | Enable Tor fallback when no proxies available (requires tor package) |
 | `TEMP_DIR` | `/tmp/bun-video-bot` | Temporary download directory |
 | `DATABASE_PATH` | `./data/bot.db` | SQLite database location |
 | `NODE_ENV` | `development` | Environment (development/production/test) |
@@ -199,6 +205,7 @@ The Docker image includes:
 - **Bun 1.3** runtime (slim base, ~130MB)
 - **yt-dlp** (latest via pip, with `--break-system-packages`)
 - **FFmpeg 7.1** (for DASH stream merging)
+- **Tor** (for anonymous fallback when proxies fail)
 - **Healthcheck** every 30s
 - **Auto-restart** on crash (`unless-stopped`)
 - **Log rotation** (10MB max, 3 files)

@@ -6,6 +6,7 @@ import { registerGeneralHandlers } from "./handlers/general";
 import { registerDownloadHandler } from "./handlers/download";
 import { registerAdminHandlers } from "./handlers/admin";
 import { cleanupOrphans, registerShutdownHandlers } from "./cleanup";
+import { initProxyPool } from "./services/proxy";
 
 /**
  * Application entry point.
@@ -26,7 +27,10 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info("Database initialised");
 
-  // 3. Create bot
+  // 3. Init proxy pool (non-blocking — builds in background)
+  initProxyPool();
+
+  // 4. Create bot
   const bot = createBot();
   logger.info("Bot instance created");
 

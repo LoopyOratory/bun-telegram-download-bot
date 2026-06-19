@@ -34,6 +34,7 @@ bun-video-bot/
 │   │   └── queue.ts        # Serial write queue (SQLite: single-writer)
 │   ├── services/
 │   │   ├── downloader.ts   # yt-dlp CLI wrapper (Bun.spawn), emits progress events
+│   │   ├── proxy.ts        # Three-tier proxy system: PROXY_URL → free pool → Tor
 │   │   ├── tracker.ts      # Download logging + user upsert
 │   │   └── admin.ts        # Admin queries: stats, user lookup, ban/unban
 │   ├── middleware/
@@ -642,6 +643,52 @@ export function trackError(id: number, error: string): Promise<void> {
     )
   })
 }
+
+## Proxy System (services/proxy.ts)
+
+Three-tier proxy system to avoid IP-based blocking by Google/YouTube and other platforms.
+
+### Priority chain
+
+1. **`PROXY_URL`** (env var) — manual proxy, always takes top priority if set
+2. **Auto-pool** — fetches ~5000 free proxies from iplocate/free-proxy-list (updated every 30 min)
+3. **Tor** — `--tor on` flag passed to yt-dlp (requires `tor` package in Docker)
+
+### How it works
+
+```
+initProxyPool() called on startup
+  → if PROXY_URL is set → skip pool (manual mode)
+  → if PROXY_ENABLED=false → skip pool
+  → fetch list from GitHub raw (all-proxies.txt)
+  → shuffle, test batches of 30 in parallel against Google (5s timeout)
+  → keep up to 10 working proxies in memory
+  → refresh pool every 10 minutes in background
+
+getProxy() called per download
+  → return PROXY_URL if set (manual)
+  → return round-robin proxy from pool
+  → return null if pool empty (caller falls back to Tor)
+
+reportFailure(proxy) called on download error
+  → remove failing proxy from pool
+  → next retry picks a different proxy
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROXY_URL` | `""` | Manual proxy URL (http/https/socks5). Disables auto-pool. |
+| `PROXY_ENABLED` | `true` | Enable free proxy auto-pool |
+| `TOR_ENABLED` | `true` | Enable Tor fallback |
+
+### Proxy integration in downloader.ts
+
+- `buildYtDlpArgs()` calls `getProxy()` → appends `--proxy <url>` if available
+- If `getProxy()` returns null and `TOR_ENABLED=true` → appends `--tor on`
+- On RATE_LIMITED, PLATFORM_BLOCKED, TIMEOUT, or UNKNOWN errors → calls `reportFailure()` and retries with a different proxy
+- `listFormats()` also uses proxy/Tor
 
 ## Security Standards
 

@@ -22,6 +22,9 @@ services:
       - TEMP_DIR=/tmp/bun-video-bot
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - PROXY_URL=${PROXY_URL:-}
+      - PROXY_ENABLED=${PROXY_ENABLED:-true}
+      - TOR_ENABLED=${TOR_ENABLED:-true}
       - DATABASE_PATH=/app/data/bot.db
       - NODE_ENV=production
     volumes:

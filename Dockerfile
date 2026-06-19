@@ -38,6 +38,7 @@ RUN apt-get update -qq && \
         python3-pip \
         curl \
         ca-certificates \
+        tor \
         --no-install-recommends && \
     pip3 install --no-cache-dir --break-system-packages yt-dlp && \
     apt-get clean && \
