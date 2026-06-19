@@ -21,7 +21,7 @@ import {
 
 /** Regex to parse yt-dlp progress line */
 const PROGRESS_REGEX =
-  /\[download\]\s+(\d+\.?\d*)%.*?at\s+([\d.]+[KMG]?i?B\/s]).*?ETA\s+(\d+:\d+)/i;
+  /\[download\]\s+(\d+\.?\d*)%.*?at\s+([\d.]+[KMG]?i?B\/s).*?ETA\s+(\d+:\d+)/i;
 
 interface SpawnOptions {
   url: string;
