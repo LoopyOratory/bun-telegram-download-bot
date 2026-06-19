@@ -298,10 +298,11 @@ export async function downloadVideo(
  * List available formats for a URL using yt-dlp -F.
  * Returns unique resolutions up to 1080p with their format codes.
  */
-export async function listFormats(url: string): Promise<FormatInfo[]> {
+export async function listFormats(url: string, attempt = 0): Promise<FormatInfo[]> {
   const platform = detectPlatform(url);
+  const MAX_ATTEMPTS = 3;
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const formatArgs = ["-F", url, "--no-playlist", "--no-cache-dir", "--no-warnings"];
     const proxy = getProxy();
     if (proxy) {
@@ -333,10 +334,25 @@ export async function listFormats(url: string): Promise<FormatInfo[]> {
 
       if (exitCode !== 0 || !output.includes("Available formats")) {
         if (exitCode !== 0) {
-          logger.warn({ url: url.slice(0, 100), exitCode }, "listFormats: yt-dlp exited with non-zero code");
+          logger.warn({ url: url.slice(0, 100), exitCode, attempt }, "listFormats: yt-dlp exited with non-zero code");
         } else {
-          logger.warn({ url: url.slice(0, 100) }, "listFormats: output missing 'Available formats' marker");
+          logger.warn({ url: url.slice(0, 100), attempt }, "listFormats: output missing 'Available formats' marker");
         }
+
+        if (attempt < MAX_ATTEMPTS - 1) {
+          const currentProxy = getProxy();
+          if (currentProxy) {
+            reportFailure(currentProxy);
+          }
+
+          const delay = RETRY_DELAY_BASE_MS * Math.pow(2, attempt);
+          logger.info({ attempt, delay, proxyFailure: !!currentProxy }, "Retrying listFormats");
+          await sleep(delay);
+          const formats = await listFormats(url, attempt + 1);
+          resolve(formats);
+          return;
+        }
+
         resolve([]);
         return;
       }
