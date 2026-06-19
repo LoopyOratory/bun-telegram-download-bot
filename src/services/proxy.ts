@@ -13,7 +13,6 @@ const POOL_MIN_SIZE = 3;
 const BATCH_TEST_SIZE = 30;
 
 let proxyPool: string[] = [];
-let poolIndex = 0;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 async function fetchProxyList(): Promise<string[]> {
@@ -28,17 +27,9 @@ async function fetchProxyList(): Promise<string[]> {
     .filter((line) => line && !line.startsWith("#"));
 }
 
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-async function testProxy(proxy: string): Promise<boolean> {
+async function testProxy(proxy: string): Promise<{ proxy: string; latencyMs: number } | null> {
   try {
+    const start = Date.now();
     const proc = spawn([
       "curl",
       "-s", "-o", "/dev/null",
@@ -53,41 +44,43 @@ async function testProxy(proxy: string): Promise<boolean> {
 
     const stdout = await new Response(proc.stdout).text();
     const exitCode = await proc.exited;
+    const latencyMs = Date.now() - start;
 
-    if (exitCode !== 0) return false;
+    if (exitCode !== 0) return null;
     const code = parseInt(stdout.trim(), 10);
-    return code >= 200 && code < 400;
+    if (code >= 200 && code < 400) {
+      return { proxy, latencyMs };
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 async function buildPool(): Promise<void> {
   try {
     const allProxies = await fetchProxyList();
-    const candidates = shuffle(allProxies);
+    const candidates = allProxies.sort(() => Math.random() - 0.5);
 
-    const tested: string[] = [];
+    const tested: { proxy: string; latencyMs: number }[] = [];
 
     for (let i = 0; i < candidates.length && tested.length < POOL_TARGET_SIZE; i += BATCH_TEST_SIZE) {
       const batch = candidates.slice(i, i + BATCH_TEST_SIZE);
-      const results = await Promise.all(
-        batch.map(async (proxy) => {
-          const ok = await testProxy(proxy);
-          return { proxy, ok };
-        }),
-      );
+      const results = await Promise.all(batch.map(testProxy));
 
       for (const r of results) {
-        if (r.ok) tested.push(r.proxy);
+        if (r) tested.push(r);
         if (tested.length >= POOL_TARGET_SIZE) break;
       }
     }
 
     if (tested.length > 0) {
-      proxyPool = tested;
-      poolIndex = 0;
-      logger.info({ poolSize: proxyPool.length }, "Proxy pool built");
+      tested.sort((a, b) => a.latencyMs - b.latencyMs);
+      proxyPool = tested.map((t) => t.proxy);
+      logger.info(
+        { poolSize: proxyPool.length, fastestMs: tested[0].latencyMs, slowestMs: tested[tested.length - 1].latencyMs },
+        "Proxy pool built (sorted by speed)",
+      );
     } else if (proxyPool.length === 0) {
       logger.warn("Proxy pool is empty — all proxies failed testing");
     } else {
@@ -124,9 +117,7 @@ export function getProxy(): string | null {
     return null;
   }
 
-  const proxy = proxyPool[poolIndex % proxyPool.length];
-  poolIndex++;
-  return proxy;
+  return proxyPool[0];
 }
 
 export function reportFailure(proxy: string): void {
