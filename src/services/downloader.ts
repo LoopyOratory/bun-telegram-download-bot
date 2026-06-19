@@ -47,7 +47,6 @@ function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions, formatCode?
     "--newline",
     "--max-filesize", `${env.MAX_FILE_SIZE_MB}M`,
     "--no-warnings",
-    "--merge-output-format", "mp4",
   ];
 
   // Platform-specific args
