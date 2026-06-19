@@ -155,13 +155,27 @@ export async function downloadVideo(
     const stderrReader = proc.stderr.getReader();
     const readStderr = async () => {
       const decoder = new TextDecoder();
+      let lineBuffer = "";
       while (true) {
         const { done, value } = await stderrReader.read();
-        if (done) break;
+        if (done) {
+          if (lineBuffer.length > 0) {
+            const progress = parseProgressLine(lineBuffer);
+            if (progress) {
+              lastProgress = progress;
+              onProgress?.(progress);
+            }
+          }
+          break;
+        }
         const text = decoder.decode(value, { stream: true });
         stderrChunks.push(text);
 
-        for (const line of text.split("\n")) {
+        lineBuffer += text;
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop() || "";
+
+        for (const line of lines) {
           const progress = parseProgressLine(line);
           if (progress) {
             lastProgress = progress;
