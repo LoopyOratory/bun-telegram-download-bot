@@ -23,6 +23,10 @@ import {
 const PROGRESS_REGEX =
   /\[download\]\s+(\d+\.?\d*)%.*?at\s+([\d.]+[KMG]?i?B\/s).*?ETA\s+(\d+:\d+)/i;
 
+function shouldProxyPlatform(platform: string): boolean {
+  return platform === "youtube";
+}
+
 interface SpawnOptions {
   url: string;
   outputPath: string;
@@ -51,12 +55,14 @@ function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions, formatCode?
     args.push("--extractor-args", "tiktok:no_watermark=true");
   }
 
-  // Proxy args
-  const proxy = getProxy();
-  if (proxy) {
-    args.push("--proxy", proxy);
-  } else if (isTorAvailable()) {
-    args.push(...getTorArgs());
+  // Proxy args (YouTube only — other platforms don't need it)
+  if (shouldProxyPlatform(platform)) {
+    const proxy = getProxy();
+    if (proxy) {
+      args.push("--proxy", proxy);
+    } else if (isTorAvailable()) {
+      args.push(...getTorArgs());
+    }
   }
 
   return args;
@@ -255,18 +261,20 @@ export async function downloadVideo(
       let fileExists = await bunFile.exists();
 
       if (!fileExists) {
-        // Search for any file starting with our output path prefix
+        // Search for any file starting with our output base name (without extension).
+        // yt-dlp may produce .mkv when ffmpeg cannot merge into mp4 (codec mismatch).
         const { readdir } = await import("node:fs/promises");
         try {
           const dir = outputPath.substring(0, outputPath.lastIndexOf("/"));
-          const prefix = outputPath.substring(outputPath.lastIndexOf("/") + 1);
+          const baseName = outputPath.substring(outputPath.lastIndexOf("/") + 1);
+          const prefix = baseName.includes(".") ? baseName.slice(0, baseName.lastIndexOf(".")) : baseName;
           const files = await readdir(dir);
           const match = files.find(f => f.startsWith(prefix));
           if (match) {
             filePath = `${dir}/${match}`;
             bunFile = Bun.file(filePath);
             fileExists = true;
-            logger.info({ expectedPath: outputPath, actualPath: filePath }, "Found merged output file");
+            logger.info({ expectedPath: outputPath, actualPath: filePath }, "Found merged output file (extension mismatch)");
           }
         } catch {}
       }
@@ -318,11 +326,13 @@ export async function listFormats(url: string, attempt = 0): Promise<FormatInfo[
 
   return new Promise((resolve) => {
     const formatArgs = ["-F", url, "--no-playlist", "--no-cache-dir", "--no-warnings"];
-    const proxy = getProxy();
-    if (proxy) {
-      formatArgs.push("--proxy", proxy);
-    } else if (isTorAvailable()) {
-      formatArgs.push(...getTorArgs());
+    if (shouldProxyPlatform(platform)) {
+      const proxy = getProxy();
+      if (proxy) {
+        formatArgs.push("--proxy", proxy);
+      } else if (isTorAvailable()) {
+        formatArgs.push(...getTorArgs());
+      }
     }
 
     const proc = spawn(["yt-dlp", ...formatArgs], {
