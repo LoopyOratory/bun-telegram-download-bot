@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="30.0.4">
+  <diagram name="Page-1">
+    <mxGraphModel>
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="2" value="System Architecture" style="text;html=1;fontSize=20;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="0" y="10" width="780" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Row 0: User -->
+        <mxCell id="3" value="User" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="310" y="60" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: User → Bot API -->
+        <mxCell id="4" value="send URL" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="3" target="5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Row 1: Bot API -->
+        <mxCell id="5" value="Telegram Bot API" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="310" y="140" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: Bot API → Auth -->
+        <mxCell id="6" value="webhook / polling" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="5" target="7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Row 2: Auth MW -->
+        <mxCell id="7" value="Auth MW" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="110" y="230" width="140" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: Auth → Rate Limit -->
+        <mxCell id="8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="7" target="9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Row 2: Rate Limiter -->
+        <mxCell id="9" value="Rate Limiter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="530" y="230" width="140" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- DB icon near Auth -->
+        <mxCell id="10" value="SQLite (bans)" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="20" y="225" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: Auth → DB -->
+        <mxCell id="11" value="check ban" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="7" target="10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: Rate → Handler -->
+        <mxCell id="12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="9" target="13">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Row 3: Download Handler -->
+        <mxCell id="13" value="Download Handler" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="310" y="320" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Branch labels -->
+        <mxCell id="14" value="short platform&#xa;(TikTok/IG)" style="text;html=1;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="110" y="370" width="100" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="15" value="other&#xa;(YouTube/Twitter)" style="text;html=1;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="570" y="370" width="100" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: Handler → listFormats (right branch) -->
+        <mxCell id="16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="13" target="17">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: Handler → downloadVideo (left branch) -->
+        <mxCell id="18" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="13" target="19">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Row 4 Left: listFormats -->
+        <mxCell id="17" value="listFormats&#xa;(yt-dlp -F)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="90" y="420" width="130" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Row 4 Right: downloadVideo -->
+        <mxCell id="19" value="downloadVideo&#xa;(yt-dlp spawn)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="560" y="420" width="130" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: listFormats → yt-dlp -->
+        <mxCell id="20" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="17" target="21">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: downloadVideo → yt-dlp -->
+        <mxCell id="22" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="19" target="21">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Row 5: yt-dlp process (spans center) -->
+        <mxCell id="21" value="yt-dlp process&#xa;--proxy / --tor / direct" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="310" y="510" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Proxy pool (right of yt-dlp) -->
+        <mxCell id="23" value="Proxy Pool&#xa;(YouTube only)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="560" y="510" width="140" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: yt-dlp → Proxy -->
+        <mxCell id="24" value="getProxy()" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="21" target="23">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: yt-dlp → stderr progress -->
+        <mxCell id="25" value="stderr progress" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="21" target="26">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Row 6: Progress Parser -->
+        <mxCell id="26" value="Progress Parser&#xa;(line-buffered)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="310" y="600" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: Progress → Telegram edit -->
+        <mxCell id="27" value="editMessageText" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="26" target="28">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Row 7: sendVideo -->
+        <mxCell id="28" value="sendVideo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="310" y="690" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: sendVideo → Cleanup -->
+        <mxCell id="29" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="28" target="30">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Row 8: Cleanup -->
+        <mxCell id="30" value="Cleanup&#xa;(unlink file)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="310" y="780" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow: Cleanup → DB -->
+        <mxCell id="31" value="track download" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="30" target="32">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Row 9: SQLite Tracker -->
+        <mxCell id="32" value="Tracker&#xa;(SQLite)" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="320" y="870" width="140" height="50" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

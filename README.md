@@ -119,6 +119,10 @@ https://www.tiktok.com/@user/video/123456789
 
 ## 🏗️ Architecture
 
+<p align="center">
+  <img src="docs/diagrams/architecture.drawio.png" alt="System Architecture" width="80%" />
+</p>
+
 ```
 User sends URL
   → Auth middleware (check ALLOWED_USERS/GROUPS + ban list)
@@ -179,9 +183,16 @@ src/
 | `PROXY_URL` | `""` | Manual proxy (takes priority, YouTube only). Supports http://, https://, socks5:// |
 | `PROXY_ENABLED` | `true` | Enable proxy pool (YouTube only). Proxies speed-tested, fastest used first |
 | `TOR_ENABLED` | `true` | Enable Tor fallback when pool empty (YouTube only, requires tor package) |
+| `COOKIES_STRING` | `""` | YouTube cookie string (takes priority over proxy). Export via `document.cookie` while signed in |
 | `TEMP_DIR` | `/tmp/bun-video-bot` | Temporary download directory |
 | `DATABASE_PATH` | `./data/bot.db` | SQLite database location |
 | `NODE_ENV` | `development` | Environment (development/production/test) |
+
+### Proxy Resolution Order
+
+<p align="center">
+  <img src="docs/diagrams/proxy.drawio.png" alt="Proxy Priority Chain" width="75%" />
+</p>
 
 ---
 
