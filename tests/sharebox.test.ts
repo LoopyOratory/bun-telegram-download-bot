@@ -67,6 +67,7 @@ describe("shareFile (chunked)", () => {
 
   test("forces chunked and assembles init → chunks → complete", async () => {
     const calls: string[] = [];
+    const progress: number[] = [];
     (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
       const u = String(url);
       calls.push(u);
@@ -76,11 +77,16 @@ describe("shareFile (chunked)", () => {
       throw new Error(`unexpected url ${u}`);
     };
 
-    const result = await shareFile(SRC, { baseUrl: "http://box:12345", forceChunked: true });
+    const result = await shareFile(SRC, {
+      baseUrl: "http://box:12345",
+      forceChunked: true,
+      onChunk: (done, total) => progress.push(done), // total is 1 for the tiny file
+    });
 
     expect(calls[0]).toContain("/chunk/upload/init/");
     expect(calls.some((u) => u.includes("/chunk/upload/chunk/u1/0"))).toBe(true);
     expect(calls.some((u) => u.includes("/chunk/upload/complete/u1"))).toBe(true);
+    expect(progress).toEqual([1]);
     expect(result).toEqual({ code: "CHNK", link: "http://box:12345/share/CHNK" });
   });
 

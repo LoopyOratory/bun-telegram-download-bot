@@ -30,13 +30,14 @@ const pendingSelections = new Map<string, { url: string; chatId: number; formats
  * it even when the bot talks to the box on an internal address. Files last
  * two hours and are never shown here below SHAREBOX_MIN_SIZE_MB.
  */
-function shareViaBox(filePath: string): Promise<ShareResult> {
+function shareViaBox(filePath: string, onChunk?: (done: number, total: number) => void): Promise<ShareResult> {
   return shareFile(filePath, {
     baseUrl: env.SHAREBOX_URL!,
     token: env.SHAREBOX_TOKEN,
     publicUrl: env.SHAREBOX_PUBLIC_URL,
     expireValue: 2,
     expireStyle: "hour",
+    onChunk,
   });
 }
 
@@ -171,7 +172,12 @@ async function doDownload(
     if (env.SHAREBOX_URL && result.fileSize > env.SHAREBOX_MIN_SIZE_MB * 1024 * 1024) {
       // Over the configured share threshold — upload to the file box and hand
       // the user a link + passcode (original quality, no encode wait).
-      const share = await shareViaBox(result.filePath);
+      await ctx.api.editMessageText(chatId, statusMsgId, "📦 Uploading to File Box…").catch(() => {});
+      const share = await shareViaBox(result.filePath, (done, total) => {
+        ctx.api
+          .editMessageText(chatId, statusMsgId, `📦 Uploading to File Box… ${done}/${total}`)
+          .catch(() => {});
+      });
       await ctx.api.editMessageText(
         chatId,
         statusMsgId,
@@ -192,7 +198,12 @@ async function doDownload(
     } catch (err) {
       if (!(err instanceof GrammyError && err.error_code === 413)) throw err;
       if (env.SHAREBOX_URL) {
-        const share = await shareViaBox(result.filePath);
+        await ctx.api.editMessageText(chatId, statusMsgId, "📦 Uploading to File Box…").catch(() => {});
+        const share = await shareViaBox(result.filePath, (done, total) => {
+          ctx.api
+            .editMessageText(chatId, statusMsgId, `📦 Uploading to File Box… ${done}/${total}`)
+            .catch(() => {});
+        });
         await ctx.api.editMessageText(
           chatId,
           statusMsgId,

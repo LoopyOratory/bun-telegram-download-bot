@@ -18,6 +18,8 @@ export interface ShareFileOptions {
   publicUrl?: string;
   /** Force the chunked path even for small files (test/diagnostic). */
   forceChunked?: boolean;
+  /** Called after each chunk upload so the UI can show live progress. */
+  onChunk?: (uploadedChunks: number, totalChunks: number) => void;
 }
 
 /** Chunk size for the chunked upload path. Small enough to live under any
@@ -85,6 +87,7 @@ async function chunkedUpload(
   token: string | undefined,
   expireValue: number,
   expireStyle: string,
+  onChunk?: (uploadedChunks: number, totalChunks: number) => void,
 ): Promise<string> {
   const size = file.size;
   const buffer = await file.arrayBuffer();
@@ -114,6 +117,7 @@ async function chunkedUpload(
         headers: authHeaders,
       });
       if (!chunkRes.ok) throw fail(`Chunk ${i}/${totalChunks} upload failed (HTTP ${chunkRes.status})`);
+      onChunk?.(i + 1, totalChunks);
     }
 
     const completeRes = await fetch(`${baseUrl}/chunk/upload/complete/${uploadId}`, {
@@ -153,11 +157,11 @@ export async function shareFile(filePath: string, options: ShareFileOptions): Pr
   let code: string;
   try {
     code = useChunked
-      ? await chunkedUpload(baseUrl, file, fileName, options.token, expireValue, expireStyle)
+      ? await chunkedUpload(baseUrl, file, fileName, options.token, expireValue, expireStyle, options.onChunk)
       : await directUpload(baseUrl, file, fileName, options.token, expireValue, expireStyle);
   } catch (err) {
     if (!useChunked && isCapturable(err as DownloadError)) {
-      code = await chunkedUpload(baseUrl, file, fileName, options.token, expireValue, expireStyle);
+      code = await chunkedUpload(baseUrl, file, fileName, options.token, expireValue, expireStyle, options.onChunk);
     } else {
       throw err;
     }
