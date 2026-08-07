@@ -39,13 +39,14 @@ RUN apt-get update -qq && \
         curl \
         ca-certificates \
         tor \
+        aria2 \
         --no-install-recommends && \
     pip3 install --no-cache-dir --break-system-packages yt-dlp && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Verify installations
-RUN yt-dlp --version && ffmpeg -version | head -1
+RUN yt-dlp --version && ffmpeg -version | head -1 && aria2c --version | head -1
 
 WORKDIR /app
 

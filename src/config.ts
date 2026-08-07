@@ -48,6 +48,14 @@ export const envSchema = z.object({
     .default("true")
     .transform((v) => v === "true" || v === "1"),
 
+  // Use aria2c as yt-dlp's external downloader for faster, multi-connection
+  // transfers. yt-dlp still handles extraction/format selection — aria2 only
+  // does the byte transfer. Requires aria2c on PATH.
+  ARIA2_ENABLED: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
+
   // FileCodeBox file-sharing fallback for videos over Telegram's upload cap.
   SHAREBOX_URL: z
     .string()

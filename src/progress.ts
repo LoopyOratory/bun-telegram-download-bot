@@ -67,3 +67,16 @@ export function buildProgressText(pct: string, speed: string, eta: string): stri
   const spinner = SPINNER[nextFrame(SPINNER.length)];
   return `${spinner} Downloading...\n${bar} ${pct}%\n⚡ ${speed}  ⏱ ${eta}`;
 }
+
+/**
+ * Build progress text for a Telegram upload in progress.
+ */
+export function buildUploadProgress(percent: number, sentBytes: number, totalBytes: number): string {
+  const bar = renderAnimatedBar(percent);
+  const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
+  return [
+    `📤 Uploading to Telegram ${percent.toFixed(1)}%`,
+    bar,
+    `${mb(sentBytes)} / ${mb(totalBytes)} MB`,
+  ].join("\n");
+}

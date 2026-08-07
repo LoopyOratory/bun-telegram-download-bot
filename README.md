@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/runtime-Bun-ff69b4?logo=bun&labelColor=1a1a2e" alt="Bun" />
-  <img src="https://img.shields.io/badge/tests-84%2F84%20passing-success?labelColor=1a1a2e" alt="Tests" />
+  <img src="https://img.shields.io/badge/tests-88%2F88%20passing-success?labelColor=1a1a2e" alt="Tests" />
   <img src="https://img.shields.io/badge/docker-ready-blue?logo=docker&labelColor=1a1a2e" alt="Docker" />
   <img src="https://img.shields.io/badge/license-MIT-green?labelColor=1a1a2e" alt="License" />
 </p>
@@ -31,7 +31,8 @@
 - **📦 Auto-Compression** — files over Telegram's 50MB upload limit are live re-encoded with ffmpeg (no size cap on the download itself)
 - **📦 File Box Share** — videos over the Telegram 50MB cap are uploaded to your self-hosted FileCodeBox and shared as a link + passcode (original quality). Chunked uploads pass reverse-proxy body caps (e.g. Cloudflare's 100MB).
 - **🔌 Smart Proxy** — three-tier proxy system for YouTube only (other sites download direct). Proxies are speed-tested and sorted by latency; fastest is always used. Auto-rotates on failure.
-- **📈 Progress Tracking** — real-time download progress with animated status bar
+- **⚡ aria2 Acceleration** — optional multi-connection download backend for yt-dlp (`ARIA2_ENABLED`); yt-dlp still handles site extraction, aria2 just speeds up the transfer
+- **📈 Progress Tracking** — live animated progress bar for both the download and the Telegram upload itself (no more silent "Uploading..." with no feedback)
 - **🐳 Docker Ready** — multi-stage Dockerfile with healthcheck and docker-compose for one-command deployment
 - **⚡ Bun Native** — built on Bun's zero-config runtime: SQLite, test runner, package manager — all built in
 
@@ -184,6 +185,7 @@ src/
 | `PROXY_URL` | `""` | Manual proxy (takes priority, YouTube only). Supports http://, https://, socks5:// |
 | `PROXY_ENABLED` | `true` | Enable proxy pool (YouTube only). Proxies speed-tested, fastest used first |
 | `TOR_ENABLED` | `true` | Enable Tor fallback when pool empty (YouTube only, requires tor package) |
+| `ARIA2_ENABLED` | `false` | Use `aria2c` as yt-dlp's download backend for faster multi-connection transfers (requires the `aria2` package) |
 | `SHAREBOX_URL` | `""` | Self-hosted FileCodeBox base URL; videos over the size threshold are shared via link + passcode |
 | `SHAREBOX_PUBLIC_URL` | `""` | Public base URL baked into share links (defaults to `SHAREBOX_URL`) |
 | `SHAREBOX_MIN_SIZE_MB` | `49.99` | Files at/above this size go to the file box; smaller send inline |
@@ -223,6 +225,7 @@ The Docker image includes:
 - **yt-dlp** (latest via pip, with `--break-system-packages`)
 - **FFmpeg 7.1** (for DASH stream merging)
 - **Tor** (for anonymous fallback when proxies fail)
+- **aria2** (optional yt-dlp download backend, `ARIA2_ENABLED=true`)
 - **Healthcheck** every 30s
 - **Auto-restart** on crash (`unless-stopped`)
 - **Log rotation** (10MB max, 3 files)
@@ -266,8 +269,9 @@ bun run build
 | **Admin Output** | 6 | Formatted message structure |
 | **Limits** | 2 | Free-disk-space guard |
 | **Compression** | 2 | Telegram upload-size bitrate planner |
-| **File Box** | 5 | Share client: single-shot + chunked, proxy-reject fallback |
-| **Total** | **84** | All passing |
+| **File Box** | 8 | Share client: single-shot + chunked, proxy-reject fallback, basename filename regression |
+| **Downloader** | 9 | yt-dlp arg building (audio-merge format selector), progress parsing, error classification |
+| **Total** | **88** | All passing |
 
 ---
 

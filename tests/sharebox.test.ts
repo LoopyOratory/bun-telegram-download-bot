@@ -36,6 +36,26 @@ describe("shareFile (single-shot)", () => {
     expect(result).toEqual({ code: "K1T2Z", link: "http://box:12345/share/K1T2Z" });
   });
 
+  // Regression test: Bun.file(path).name returns the full path, not the
+  // basename. Without an explicit fileName, the upload used to send the
+  // entire local temp path (with slashes) as the file's name, which
+  // FileCodeBox rejects/mishandles — causing every no-fileName-option
+  // upload (i.e. the bot's real call site) to fail.
+  test("derives the upload filename from the basename, not the full temp path", async () => {
+    let sentFileName = "";
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+      const form = init?.body as FormData;
+      const file = form.get("file") as File;
+      sentFileName = file.name;
+      return jsonResponse({ code: 200, detail: { code: "OK1" } });
+    };
+
+    await shareFile(SRC, { baseUrl: "http://box:12345" });
+
+    expect(sentFileName).toBe("sharebox-test-src.mp4");
+    expect(sentFileName).not.toContain("/");
+  });
+
   test("uses the public URL for the link when provided", async () => {
     (globalThis as any).fetch = async () => jsonResponse({ code: 200, detail: { code: "ABC" } });
     const result = await shareFile(SRC, { baseUrl: "http://internal:12345", publicUrl: "https://files.example.com" });
@@ -88,6 +108,24 @@ describe("shareFile (chunked)", () => {
     expect(calls.some((u) => u.includes("/chunk/upload/complete/u1"))).toBe(true);
     expect(progress).toEqual([1]);
     expect(result).toEqual({ code: "CHNK", link: "http://box:12345/share/CHNK" });
+  });
+
+  test("chunked init sends the basename, not the full temp path", async () => {
+    let initBody: any = null;
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith("/chunk/upload/init/")) {
+        initBody = JSON.parse(init!.body as string);
+        return initRes();
+      }
+      if (u.includes("/chunk/upload/chunk/")) return chunkRes();
+      if (u.includes("/chunk/upload/complete/")) return completeRes();
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    await shareFile(SRC, { baseUrl: "http://box:12345", forceChunked: true });
+
+    expect(initBody.file_name).toBe("sharebox-test-src.mp4");
   });
 
   test("falls back to chunked when the proxy rejects the single-shot upload", async () => {

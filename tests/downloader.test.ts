@@ -7,6 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { DownloadError, DownloadErrorCode } from "../src/types";
+import { buildYtDlpArgs } from "../src/services/downloader";
 
 // Replicate the classification logic from downloader.ts for testing
 function classifyYtDlpError(stderr: string): DownloadError {
@@ -72,5 +73,29 @@ describe("classifyYtDlpError", () => {
     const err = classifyYtDlpError("Something unexpected happened\nLine 2\nLine 3");
     expect(err.code).toBe(DownloadErrorCode.UNKNOWN);
     expect(err.message).toContain("Something unexpected happened");
+  });
+});
+
+describe("buildYtDlpArgs format selection", () => {
+  // Regression test: "best[ext=mp4]" as the FIRST alternative can be
+  // satisfied by a single video-only stream on platforms with no combined
+  // audio+video format at top quality, so it never falls through to the
+  // bestvideo+bestaudio merge. The merge must come first to guarantee audio.
+  test("default format selector merges video+audio before falling back to a single stream", () => {
+    const args = buildYtDlpArgs({ url: "https://example.com/v", outputPath: "/tmp/out.mp4", platform: "tiktok" });
+    const fmtIndex = args.indexOf("-f");
+    expect(fmtIndex).toBeGreaterThanOrEqual(0);
+    const fmt = args[fmtIndex + 1];
+    const alternatives = fmt.split("/");
+    expect(alternatives[0]).toBe("bestvideo[ext=mp4]+bestaudio[ext=m4a]");
+  });
+
+  test("explicit formatCode from resolution selection is passed through unchanged", () => {
+    const args = buildYtDlpArgs(
+      { url: "https://example.com/v", outputPath: "/tmp/out.mp4", platform: "youtube" },
+      "137+bestaudio[ext=m4a]",
+    );
+    const fmtIndex = args.indexOf("-f");
+    expect(args[fmtIndex + 1]).toBe("137+bestaudio[ext=m4a]");
   });
 });

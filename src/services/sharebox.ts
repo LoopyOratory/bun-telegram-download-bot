@@ -32,6 +32,18 @@ function trimBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
+/**
+ * Bun.file(path).name returns the path it was constructed with, not just the
+ * basename — so a caller relying on that as the upload's display filename
+ * ends up sending the full local temp path (e.g. "/tmp/bot/xyz.mp4") as the
+ * file's "name" in the multipart body. FileCodeBox rejects/mishandles a
+ * filename containing slashes, so the share upload fails. Always strip to
+ * the basename before using a path as a filename.
+ */
+function basename(path: string): string {
+  return path.split(/[/\\]/).pop() || path;
+}
+
 /** The minimal shape of Bun.file() that the uploaders rely on. */
 interface ShareFile {
   name?: string;
@@ -151,7 +163,7 @@ export async function shareFile(filePath: string, options: ShareFileOptions): Pr
   const expireValue = options.expireValue ?? 2;
   const expireStyle = options.expireStyle ?? "hour";
   const file = Bun.file(filePath);
-  const fileName = options.fileName ?? file.name ?? "download";
+  const fileName = options.fileName ?? basename(filePath) ?? "download";
   const useChunked = options.forceChunked ?? file.size > SINGLE_SHOT_LIMIT_BYTES;
 
   let code: string;

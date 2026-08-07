@@ -35,8 +35,14 @@ interface SpawnOptions {
 /**
  * Build yt-dlp arguments for a given platform.
  */
-function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions, formatCode?: string): string[] {
-  const fmt = formatCode || "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best";
+export function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions, formatCode?: string): string[] {
+  // Merge separate video+audio streams FIRST. "best" alone picks whichever
+  // single format yt-dlp considers highest quality — on platforms that don't
+  // publish a combined audio+video stream at top quality, that "best" match
+  // is video-only, so the video ships with no sound. Putting the explicit
+  // bestvideo+bestaudio merge ahead of the single-stream fallback guarantees
+  // an audio track whenever separate streams exist.
+  const fmt = formatCode || "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best";
   const args = [
     url,
     "-f", fmt,
@@ -61,6 +67,13 @@ function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions, formatCode?
     } else if (isTorAvailable()) {
       args.push(...getTorArgs());
     }
+  }
+
+  if (env.ARIA2_ENABLED) {
+    args.push(
+      "--downloader", "aria2c",
+      "--downloader-args", "aria2c:-x16 -s16 -k1M",
+    );
   }
 
   return args;

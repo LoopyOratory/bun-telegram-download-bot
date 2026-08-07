@@ -8,7 +8,7 @@ import { shareFile } from "../services/sharebox";
 import type { ShareResult } from "../services/sharebox";
 import { tracker } from "../services/tracker";
 import { cleanupFile } from "../cleanup";
-import { buildCompactProgress } from "../progress";
+import { buildCompactProgress, buildUploadProgress } from "../progress";
 import { PROGRESS_UPDATE_THROTTLE_MS } from "../utils/limits";
 import { DownloadError, DownloadErrorCode, type DownloadResult, type FormatInfo } from "../types";
 import type { Bot, Context } from "grammy";
@@ -39,6 +39,61 @@ function shareViaBox(filePath: string, onChunk?: (done: number, total: number) =
     expireStyle: "hour",
     onChunk,
   });
+}
+
+/**
+ * Read a file in chunks, reporting bytes read as they're streamed out.
+ * Passed to `InputFile` so grammY uploads directly from disk while we get a
+ * progress callback — Telegram's Bot API gives no upload progress of its
+ * own, so this is the only way to show real feedback during the upload.
+ */
+async function* streamWithProgress(
+  filePath: string,
+  totalBytes: number,
+  onProgress: (sentBytes: number) => void,
+): AsyncIterable<Uint8Array> {
+  const file = Bun.file(filePath);
+  let sent = 0;
+  for await (const chunk of file.stream()) {
+    sent += chunk.byteLength;
+    onProgress(sent);
+    yield chunk;
+  }
+  if (totalBytes && sent !== totalBytes) {
+    // Informational only — Bun's chunk sizes aren't guaranteed to sum
+    // exactly to stat().size in every edge case, but this would flag a
+    // truncated read.
+    logger.debug({ filePath, sent, totalBytes }, "Stream byte count differs from file size");
+  }
+}
+
+/**
+ * Upload a video to Telegram while editing `statusMsgId` with live progress.
+ */
+async function sendVideoWithProgress(
+  ctx: Context,
+  chatId: number,
+  statusMsgId: number,
+  filePath: string,
+  fileSize: number,
+): Promise<void> {
+  let lastEdit = 0;
+  const fileName = filePath.split(/[/\\]/).pop() || "video.mp4";
+
+  const input = new InputFile(
+    streamWithProgress(filePath, fileSize, (sentBytes) => {
+      const now = Date.now();
+      if (now - lastEdit < PROGRESS_UPDATE_THROTTLE_MS) return;
+      lastEdit = now;
+      const percent = fileSize > 0 ? Math.min(100, (sentBytes / fileSize) * 100) : 0;
+      ctx.api
+        .editMessageText(chatId, statusMsgId, buildUploadProgress(percent, sentBytes, fileSize))
+        .catch(() => {});
+    }),
+    fileName,
+  );
+
+  await ctx.api.sendVideo(chatId, input, { supports_streaming: true });
 }
 
 /**
@@ -167,7 +222,6 @@ async function doDownload(
     );
 
     await ctx.api.editMessageText(chatId, statusMsgId, "🧩 Merging streams...");
-    await ctx.api.editMessageText(chatId, statusMsgId, "📤 Uploading to Telegram...");
 
     if (env.SHAREBOX_URL && result.fileSize > env.SHAREBOX_MIN_SIZE_MB * 1024 * 1024) {
       // Over the configured share threshold — upload to the file box and hand
@@ -192,9 +246,7 @@ async function doDownload(
 
     uploadedPath = result.filePath;
     try {
-      await ctx.api.sendVideo(chatId, new InputFile(uploadedPath), {
-        supports_streaming: true,
-      });
+      await sendVideoWithProgress(ctx, chatId, statusMsgId, uploadedPath, result.fileSize);
     } catch (err) {
       if (!(err instanceof GrammyError && err.error_code === 413)) throw err;
       if (env.SHAREBOX_URL) {
@@ -214,12 +266,8 @@ async function doDownload(
           .editMessageText(chatId, statusMsgId, "📦 Over Telegram's 50MB upload limit — compressing…")
           .catch(() => {});
         uploadedPath = await compressVideo(result.filePath, `${result.filePath}.small.mp4`);
-        await ctx.api
-          .editMessageText(chatId, statusMsgId, "📤 Uploading compressed file…")
-          .catch(() => {});
-        await ctx.api.sendVideo(chatId, new InputFile(uploadedPath), {
-          supports_streaming: true,
-        });
+        const compressedSize = Bun.file(uploadedPath).size;
+        await sendVideoWithProgress(ctx, chatId, statusMsgId, uploadedPath, compressedSize);
       }
     }
 
