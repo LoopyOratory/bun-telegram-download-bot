@@ -3,7 +3,7 @@ import { env } from "../config";
 import { logger } from "../utils/logger";
 import { validateUrlOrThrow, detectPlatform } from "../utils/url";
 import { downloadVideo, listFormats } from "../services/downloader";
-import { compressVideo, TELEGRAM_UPLOAD_LIMIT_BYTES } from "../services/compress";
+import { compressVideo } from "../services/compress";
 import { shareFile } from "../services/sharebox";
 import type { ShareResult } from "../services/sharebox";
 import { tracker } from "../services/tracker";
@@ -27,10 +27,17 @@ const pendingSelections = new Map<string, { url: string; chatId: number; formats
 /**
  * Upload a downloaded file to the configured FileCodeBox and return the share
  * link + passcode. The link uses SHAREBOX_PUBLIC_URL so recipients can reach
- * it even when the bot talks to the box on an internal address.
+ * it even when the bot talks to the box on an internal address. Files last
+ * two hours and are never shown here below SHAREBOX_MIN_SIZE_MB.
  */
-async function shareViaBox(filePath: string): Promise<ShareResult> {
-  return shareFile(filePath, env.SHAREBOX_URL!, env.SHAREBOX_TOKEN, undefined, undefined, env.SHAREBOX_PUBLIC_URL);
+function shareViaBox(filePath: string): Promise<ShareResult> {
+  return shareFile(filePath, {
+    baseUrl: env.SHAREBOX_URL!,
+    token: env.SHAREBOX_TOKEN,
+    publicUrl: env.SHAREBOX_PUBLIC_URL,
+    expireValue: 2,
+    expireStyle: "hour",
+  });
 }
 
 /**
@@ -161,9 +168,9 @@ async function doDownload(
     await ctx.api.editMessageText(chatId, statusMsgId, "🧩 Merging streams...");
     await ctx.api.editMessageText(chatId, statusMsgId, "📤 Uploading to Telegram...");
 
-    if (env.SHAREBOX_URL && result.fileSize > TELEGRAM_UPLOAD_LIMIT_BYTES) {
-      // Over Telegram's cap and a file box is configured — share a link instead of
-      // sending inline (original quality, no encode wait).
+    if (env.SHAREBOX_URL && result.fileSize > env.SHAREBOX_MIN_SIZE_MB * 1024 * 1024) {
+      // Over the configured share threshold — upload to the file box and hand
+      // the user a link + passcode (original quality, no encode wait).
       const share = await shareViaBox(result.filePath);
       await ctx.api.editMessageText(
         chatId,
@@ -171,7 +178,7 @@ async function doDownload(
         `📎 **File too large for Telegram** (${(result.fileSize / 1024 / 1024).toFixed(0)} MB).\n\n` +
           `📦 Grab it here: ${share.link}\n` +
           `🔑 Passcode: \`${share.code}\`\n\n` +
-          `Expires in 1 day.`,
+          `Expires in 2 hours.`,
       );
       await tracker.trackComplete(downloadId, result.fileSize, result.format, userId);
       return;

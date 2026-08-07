@@ -23,25 +23,25 @@ describe("shareFile", () => {
       return new Response(JSON.stringify({ code: 200, detail: { code: "K1T2Z", name: "a.mp4" } }), { status: 200 });
     };
 
-    const result = await shareFile(SRC, "http://box:12345/");
+    const result = await shareFile(SRC, { baseUrl: "http://box:12345/" });
 
     expect(requestUrl).toBe("http://box:12345/share/file/");
-    expect(body?.get("expire_value")).toBe("1");
-    expect(body?.get("expire_style")).toBe("day");
+    expect(body?.get("expire_value")).toBe("2");
+    expect(body?.get("expire_style")).toBe("hour");
     expect(body?.get("file")).toBeInstanceOf(File);
     expect(result).toEqual({ code: "K1T2Z", link: "http://box:12345/share/K1T2Z" });
   });
 
   test("uses the public URL for the link when provided", async () => {
     (globalThis as any).fetch = async () => new Response(JSON.stringify({ code: 200, detail: { code: "ABC" } }), { status: 200 });
-    const result = await shareFile(SRC, "http://internal:12345", undefined, undefined, undefined, "https://files.example.com");
+    const result = await shareFile(SRC, { baseUrl: "http://internal:12345", publicUrl: "https://files.example.com" });
     expect(result.link).toBe("https://files.example.com/share/ABC");
   });
 
   test("throws when the upload responds with an error", async () => {
     (globalThis as any).fetch = async () => new Response("nope", { status: 500 });
     try {
-      await shareFile(SRC, "http://box:12345");
+      await shareFile(SRC, { baseUrl: "http://box:12345" });
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(DownloadError);
@@ -51,6 +51,6 @@ describe("shareFile", () => {
 
   test("throws when the response carries no share code", async () => {
     (globalThis as any).fetch = async () => new Response(JSON.stringify({ code: 200, detail: {} }), { status: 200 });
-    await expect(shareFile(SRC, "http://box:12345")).rejects.toThrow("no share code");
+    await expect(shareFile(SRC, { baseUrl: "http://box:12345" })).rejects.toThrow("no share code");
   });
 });

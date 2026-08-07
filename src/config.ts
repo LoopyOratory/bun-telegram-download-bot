@@ -56,6 +56,8 @@ export const envSchema = z.object({
     .string()
     .optional()
     .transform((v) => v?.trim() || undefined),
+  // Files at or above this size go to the file box; smaller ones send inline.
+  SHAREBOX_MIN_SIZE_MB: z.coerce.number().positive().default(49.99),
   SHAREBOX_TOKEN: z
     .string()
     .optional()
