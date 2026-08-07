@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/runtime-Bun-ff69b4?logo=bun&labelColor=1a1a2e" alt="Bun" />
-  <img src="https://img.shields.io/badge/tests-81%2F81%20passing-success?labelColor=1a1a2e" alt="Tests" />
+  <img src="https://img.shields.io/badge/tests-84%2F84%20passing-success?labelColor=1a1a2e" alt="Tests" />
   <img src="https://img.shields.io/badge/docker-ready-blue?logo=docker&labelColor=1a1a2e" alt="Docker" />
   <img src="https://img.shields.io/badge/license-MIT-green?labelColor=1a1a2e" alt="License" />
 </p>
@@ -29,7 +29,7 @@
 - **📊 Admin Dashboard** — 14 admin commands for stats, user management, moderation, and system maintenance
 - **🔥 Retry Logic** — automatic retries with exponential backoff for transient failures (timeouts, rate limits)
 - **📦 Auto-Compression** — files over Telegram's 50MB upload limit are live re-encoded with ffmpeg (no size cap on the download itself)
-- **📦 File Box Share** — videos over the Telegram 50MB cap are uploaded to your self-hosted FileCodeBox and shared as a link + passcode (original quality)
+- **📦 File Box Share** — videos over the Telegram 50MB cap are uploaded to your self-hosted FileCodeBox and shared as a link + passcode (original quality). Chunked uploads pass reverse-proxy body caps (e.g. Cloudflare's 100MB).
 - **🔌 Smart Proxy** — three-tier proxy system for YouTube only (other sites download direct). Proxies are speed-tested and sorted by latency; fastest is always used. Auto-rotates on failure.
 - **📈 Progress Tracking** — real-time download progress with animated status bar
 - **🐳 Docker Ready** — multi-stage Dockerfile with healthcheck and docker-compose for one-command deployment
@@ -190,6 +190,7 @@ src/
 | `SHAREBOX_TOKEN` | `""` | FileCodeBox token if anonymous upload (openUpload) is disabled |
 | `COOKIES_STRING` | `""` | YouTube cookie string (takes priority over proxy). Export via `document.cookie` while signed in |
 | `TEMP_DIR` | `/tmp/bun-video-bot` | Temporary download directory |
+| `DOWNLOAD_TIMEOUT_SECONDS` | `3600` | Total budget for one download (large files need more than 5 min) |
 | `DATABASE_PATH` | `./data/bot.db` | SQLite database location |
 | `NODE_ENV` | `development` | Environment (development/production/test) |
 
@@ -265,8 +266,8 @@ bun run build
 | **Admin Output** | 6 | Formatted message structure |
 | **Limits** | 2 | Free-disk-space guard |
 | **Compression** | 2 | Telegram upload-size bitrate planner |
-| **File Box** | 3 | Sharecode + link client (stubbed) |
-| **Total** | **81** | All passing |
+| **File Box** | 5 | Share client: single-shot + chunked, proxy-reject fallback |
+| **Total** | **84** | All passing |
 
 ---
 

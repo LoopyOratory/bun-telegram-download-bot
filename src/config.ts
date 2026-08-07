@@ -24,6 +24,9 @@ export const envSchema = z.object({
     ),
 
   TEMP_DIR: z.string().default("/tmp/bun-video-bot"),
+  // Total budget for one download; large files over slow proxies need more
+  // than the old fixed 5 minutes.
+  DOWNLOAD_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(3600),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace"])
     .default("info"),

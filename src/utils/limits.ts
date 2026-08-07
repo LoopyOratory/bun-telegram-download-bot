@@ -1,11 +1,12 @@
 import { statfs } from "node:fs/promises";
+import { env } from "../config";
 import { DownloadError, DownloadErrorCode } from "../types";
 
 /** Free-space floor required before starting a download (bytes). */
 export const MIN_FREE_DISK_BYTES = 200 * 1024 * 1024;
 
-/** Max download timeout in seconds */
-export const DOWNLOAD_TIMEOUT_SECONDS = 300; // 5 min
+/** Total download timeout in seconds (env-configurable) */
+export const DOWNLOAD_TIMEOUT_SECONDS = env.DOWNLOAD_TIMEOUT_SECONDS;
 
 /** Max concurrent downloads per user */
 export const MAX_CONCURRENT_PER_USER = 1;
