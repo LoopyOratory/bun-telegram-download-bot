@@ -7,6 +7,8 @@ import { DownloadError, DownloadErrorCode } from "../types";
 export const TELEGRAM_UPLOAD_LIMIT_BYTES = 48 * 1024 * 1024;
 
 const AUDIO_BITRATE_BPS = 96_000;
+/** Lowest video encode bitrate we'll use; below this the output is unusable. */
+const MIN_VIDEO_BITRATE_BPS = 100_000;
 
 /**
  * Video bitrate (bps) that fits a target size for a known duration,
@@ -14,7 +16,7 @@ const AUDIO_BITRATE_BPS = 96_000;
  */
 export function computeVideoBitrate(durationSec: number, targetBytes: number, audioBitrateBps = AUDIO_BITRATE_BPS): number {
   const videoBitsPerSec = (targetBytes * 8) / durationSec - audioBitrateBps;
-  return Math.max(Math.round(videoBitsPerSec), 100_000);
+  return Math.max(Math.round(videoBitsPerSec), MIN_VIDEO_BITRATE_BPS);
 }
 
 async function probeDuration(filePath: string): Promise<number | null> {
@@ -52,6 +54,19 @@ export async function compressVideo(
   targetBytes = TELEGRAM_UPLOAD_LIMIT_BYTES,
 ): Promise<string> {
   const durationSec = await probeDuration(inputPath);
+
+  // Fail fast when even the bitrate floor can't fit the target — a very long
+  // video can never be compressed into 48MB, so skip the multi-minute ffmpeg
+  // grind (a 3.6-hour video made the bot hang here).
+  if (durationSec) {
+    const minBytesPerSecond = (MIN_VIDEO_BITRATE_BPS + AUDIO_BITRATE_BPS) / 8;
+    if (durationSec * minBytesPerSecond > targetBytes) {
+      throw new DownloadError(
+        DownloadErrorCode.UPLOAD_LIMIT_EXCEEDED,
+        `Video is too long (${Math.round(durationSec / 60)}min) to fit Telegram's 50MB limit even at full compression. Configure SHAREBOX_URL to share it as a link instead.`,
+      );
+    }
+  }
 
   const attempts: Array<{ label: string; filter: string | null }> = [
     { label: "bitrate", filter: null },
