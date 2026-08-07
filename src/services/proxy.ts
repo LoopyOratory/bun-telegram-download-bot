@@ -1,4 +1,5 @@
 import { spawn } from "bun";
+import { createConnection } from "node:net";
 import { env } from "../config";
 import { logger } from "../utils/logger";
 
@@ -12,8 +13,14 @@ const POOL_TARGET_SIZE = 10;
 const POOL_MIN_SIZE = 3;
 const BATCH_TEST_SIZE = 30;
 
+/** Tor runs a SOCKS5 listener on 127.0.0.1:9050 by default. */
+const TOR_HOST = "127.0.0.1";
+const TOR_PORT = 9050;
+const TOR_PROBE_TIMEOUT_MS = 1_500;
+
 let proxyPool: string[] = [];
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
+let torAvailable: boolean | null = null;
 
 async function fetchProxyList(): Promise<string[]> {
   const response = await fetch(PROXY_LIST_URL);
@@ -91,6 +98,25 @@ async function buildPool(): Promise<void> {
   }
 }
 
+async function probeTor(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: TOR_HOST, port: TOR_PORT });
+    socket.setTimeout(TOR_PROBE_TIMEOUT_MS);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
+}
+
 export async function initProxyPool(): Promise<void> {
   if (!env.PROXY_ENABLED || env.PROXY_URL) {
     logger.info("Proxy pool disabled (manual PROXY_URL or PROXY_ENABLED=false)");
@@ -99,6 +125,13 @@ export async function initProxyPool(): Promise<void> {
 
   logger.info("Initializing proxy pool...");
   await buildPool();
+
+  if (env.TOR_ENABLED) {
+    torAvailable = await probeTor();
+    logger.info({ torAvailable }, "Tor availability probed");
+  } else {
+    torAvailable = false;
+  }
 
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(buildPool, POOL_REFRESH_MS);
@@ -131,11 +164,11 @@ export function reportFailure(proxy: string): void {
 }
 
 export function isTorAvailable(): boolean {
-  return env.TOR_ENABLED;
+  return env.TOR_ENABLED && torAvailable === true;
 }
 
 export function getTorArgs(): string[] {
-  return ["--tor", "on"];
+  return ["--proxy", `socks5://${TOR_HOST}:${TOR_PORT}`];
 }
 
 export function shutdown(): void {
