@@ -41,7 +41,8 @@ export async function authMiddleware(ctx: Context, next: NextFunction): Promise<
   // Private chat: check env ALLOWED_USERS list (initial seed)
   if (ctx.chat?.type === "private") {
     if (!env.ALLOWED_USERS.includes(userId)) {
-      return await ctx.reply("❌ You are not authorized to use this bot.");
+      await ctx.reply("❌ You are not authorized to use this bot.");
+      return;
     }
     return await next();
   }
@@ -49,5 +50,5 @@ export async function authMiddleware(ctx: Context, next: NextFunction): Promise<
   // Group chat: check env ALLOWED_GROUPS list
   if (chatId && env.ALLOWED_GROUPS.includes(chatId)) return await next();
 
-  return await ctx.reply("❌ This chat is not authorized.");
+  await ctx.reply("❌ This chat is not authorized.");
 }

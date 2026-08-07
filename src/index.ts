@@ -25,8 +25,7 @@ async function main(): Promise<void> {
   await cleanupOrphans();
 
   // 2. Init database
-  initDatabase();
-  logger.info("Database initialised");
+  await initDatabase();
 
   // 3. Init proxy pool (non-blocking — builds in background)
   initProxyPool();

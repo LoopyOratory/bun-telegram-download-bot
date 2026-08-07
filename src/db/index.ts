@@ -1,4 +1,6 @@
 import { Database } from "bun:sqlite";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import { env } from "../config";
 import { SCHEMA_SQL } from "./schema";
 import { logger } from "../utils/logger";
@@ -7,9 +9,10 @@ import type { UserRow, DownloadRow } from "../types";
 let db: Database;
 
 /**
- * Initialise database: open, set WAL mode, run migrations.
+ * Initialise database: ensure parent dir exists, open, set WAL mode, run migrations.
  */
-export function initDatabase(): Database {
+export async function initDatabase(): Promise<Database> {
+  await mkdir(dirname(env.DATABASE_PATH), { recursive: true });
   db = new Database(env.DATABASE_PATH);
 
   // Performance and concurrency settings
@@ -155,26 +158,26 @@ export function banUser(telegramId: number, reason: string, isOwnerId: number): 
   }
   db.run(
     "UPDATE users SET is_allowed = 0, banned_at = datetime('now'), ban_reason = ?, updated_at = datetime('now') WHERE telegram_id = ?",
-    reason, telegramId,
+    [reason, telegramId],
   );
 }
 
 export function unbanUser(telegramId: number): void {
   db.run(
     "UPDATE users SET is_allowed = 1, banned_at = NULL, ban_reason = NULL, updated_at = datetime('now') WHERE telegram_id = ?",
-    telegramId,
+    [telegramId],
   );
 }
 
 export function approveUserInDb(telegramId: number): void {
   db.run(
     "UPDATE users SET is_allowed = 1, updated_at = datetime('now') WHERE telegram_id = ?",
-    telegramId,
+    [telegramId],
   );
 }
 
 export function setUserAsOwner(telegramId: number): void {
-  db.run("UPDATE users SET is_owner = 1 WHERE telegram_id = ?", telegramId);
+  db.run("UPDATE users SET is_owner = 1 WHERE telegram_id = ?", [telegramId]);
 }
 
 // ─── Download queries ────────────────────────────────────────
@@ -214,7 +217,7 @@ export function updateDownloadStatus(
 export function incrementUserStats(telegramId: number, fileSize: number): void {
   db.run(
     "UPDATE users SET total_downloads = total_downloads + 1, total_bytes = total_bytes + ?, updated_at = datetime('now') WHERE telegram_id = ?",
-    fileSize, telegramId,
+    [fileSize, telegramId],
   );
 }
 
