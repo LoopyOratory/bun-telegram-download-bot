@@ -1,10 +1,9 @@
 import { spawn } from "bun";
-import { mkdir, unlink } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { env } from "../config";
 import { logger } from "../utils/logger";
 import {
-  checkFileSizeLimit,
-  MAX_FILE_SIZE_BYTES,
+  ensureDiskFree,
   DOWNLOAD_TIMEOUT_SECONDS,
   MAX_DOWNLOAD_RETRIES,
   RETRY_DELAY_BASE_MS,
@@ -45,7 +44,6 @@ function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions, formatCode?
     "--no-playlist",
     "--no-cache-dir",
     "--newline",
-    "--max-filesize", `${env.MAX_FILE_SIZE_MB}M`,
     "--no-warnings",
     "--remux-video", "mp4",
   ];
@@ -85,6 +83,19 @@ function parseProgressLine(line: string): ProgressEvent | null {
 }
 
 /**
+ * Pull the first meaningful line out of yt-dlp stderr so an unclassified
+ * failure reports the real reason (proxy refused, extractor spoke, etc.)
+ * instead of a generic "Download failed".
+ */
+function firstMeaningfulErrorLine(stderr: string): string | null {
+  const line = stderr
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l && !l.startsWith("[download]") && !l.startsWith("[youtube]") && !l.startsWith("WARNING"));
+  return line ? line.slice(0, 200) : null;
+}
+
+/**
  * Check if yt-dlp stderr output indicates a known error.
  */
 function classifyYtDlpError(stderr: string): DownloadError {
@@ -112,7 +123,7 @@ function classifyYtDlpError(stderr: string): DownloadError {
     return new DownloadError(DownloadErrorCode.EXTRACTOR_ERROR, "Could not extract video info");
   }
 
-  return new DownloadError(DownloadErrorCode.UNKNOWN, "Download failed");
+  return new DownloadError(DownloadErrorCode.UNKNOWN, firstMeaningfulErrorLine(stderr) || "Download failed");
 }
 
 /**
@@ -141,8 +152,9 @@ export async function downloadVideo(
   const ext = "mp4";
   const outputPath = `${outputDir}/${videoId}.${ext}`;
 
-  // Ensure temp directory exists (mkdir is Bun-compatible via node:fs/promises)
+  // Ensure temp directory exists, then verify the volume has free space
   await mkdir(outputDir, { recursive: true });
+  await ensureDiskFree(outputDir);
 
   const args = buildYtDlpArgs({ url, outputPath, platform }, formatCode);
 
@@ -285,16 +297,6 @@ export async function downloadVideo(
       }
 
       const stat = await bunFile.stat();
-
-      // Check file size limit
-      try {
-        checkFileSizeLimit(stat.size);
-      } catch (err) {
-        // Clean up oversized file
-        await unlink(filePath).catch(() => {});
-        reject(err);
-        return;
-      }
 
       // Extract format info
       const dot = filePath.lastIndexOf(".");

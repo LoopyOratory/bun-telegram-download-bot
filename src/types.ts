@@ -70,7 +70,7 @@ export interface DownloadResult {
 /** Error classification for better diagnostics */
 export enum DownloadErrorCode {
   PRIVATE_VIDEO = "PRIVATE_VIDEO",
-  FILE_TOO_LARGE = "FILE_TOO_LARGE",
+  NO_DISK_SPACE = "NO_DISK_SPACE",
   INVALID_URL = "INVALID_URL",
   PLATFORM_BLOCKED = "PLATFORM_BLOCKED",
   RATE_LIMITED = "RATE_LIMITED",

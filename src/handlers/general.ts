@@ -45,7 +45,7 @@ const HELP_MESSAGE = [
   "✅ 1000+ more (yt-dlp)",
   "",
   "**Limits:**",
-  "• Max file size: 50 MB (configurable)",
+  "• No upload size limit — download limited only by server disk space",
   "• 1 download at a time per user",
   "• 10s cooldown between downloads",
   "",

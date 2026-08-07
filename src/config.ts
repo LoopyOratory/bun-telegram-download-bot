@@ -24,7 +24,6 @@ export const envSchema = z.object({
     ),
 
   TEMP_DIR: z.string().default("/tmp/bun-video-bot"),
-  MAX_FILE_SIZE_MB: z.coerce.number().positive().default(50),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace"])
     .default("info"),

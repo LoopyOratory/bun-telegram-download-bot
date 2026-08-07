@@ -1,8 +1,8 @@
-import { env } from "../config";
+import { statfs } from "node:fs/promises";
 import { DownloadError, DownloadErrorCode } from "../types";
 
-/** Max file size in bytes */
-export const MAX_FILE_SIZE_BYTES = env.MAX_FILE_SIZE_MB * 1024 * 1024;
+/** Free-space floor required before starting a download (bytes). */
+export const MIN_FREE_DISK_BYTES = 200 * 1024 * 1024;
 
 /** Max download timeout in seconds */
 export const DOWNLOAD_TIMEOUT_SECONDS = 300; // 5 min
@@ -23,14 +23,17 @@ export const MAX_DOWNLOAD_RETRIES = 2;
 export const RETRY_DELAY_BASE_MS = 2_000;
 
 /**
- * Check if file size exceeds the configured limit.
- * Throws a classified error if so.
+ * Refuse to download only when the target volume is running out of space.
+ * The constraint is storage availability, not an arbitrary byte cap — the
+ * same model Seal uses: download any size, fail when the disk is full.
  */
-export function checkFileSizeLimit(bytes: number): void {
-  if (bytes > MAX_FILE_SIZE_BYTES) {
+export async function ensureDiskFree(dir: string): Promise<void> {
+  const { bavail, bsize } = await statfs(dir);
+  const freeBytes = bavail * bsize;
+  if (freeBytes < MIN_FREE_DISK_BYTES) {
     throw new DownloadError(
-      DownloadErrorCode.FILE_TOO_LARGE,
-      `File too large: ${(bytes / 1024 / 1024).toFixed(1)} MB (limit: ${env.MAX_FILE_SIZE_MB} MB)`,
+      DownloadErrorCode.NO_DISK_SPACE,
+      `Not enough free disk space (${(freeBytes / 1024 / 1024).toFixed(0)} MB free). Free some space in ${dir} and try again.`,
     );
   }
 }

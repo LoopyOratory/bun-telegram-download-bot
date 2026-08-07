@@ -21,20 +21,20 @@ describe("DownloadError", () => {
 
   test("converts to JSON", () => {
     const err = new DownloadError(
-      DownloadErrorCode.FILE_TOO_LARGE,
-      "File too large: 89 MB",
+      DownloadErrorCode.NO_DISK_SPACE,
+      "Not enough disk space",
     );
     const json = err.toJSON();
     expect(json).toEqual({
-      code: DownloadErrorCode.FILE_TOO_LARGE,
-      message: "File too large: 89 MB",
+      code: DownloadErrorCode.NO_DISK_SPACE,
+      message: "Not enough disk space",
       platform: undefined,
     });
   });
 
   test.each([
     "PRIVATE_VIDEO",
-    "FILE_TOO_LARGE",
+    "NO_DISK_SPACE",
     "INVALID_URL",
     "PLATFORM_BLOCKED",
     "RATE_LIMITED",

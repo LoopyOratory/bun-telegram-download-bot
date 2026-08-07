@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/runtime-Bun-ff69b4?logo=bun&labelColor=1a1a2e" alt="Bun" />
-  <img src="https://img.shields.io/badge/tests-74%2F74%20passing-success?labelColor=1a1a2e" alt="Tests" />
+  <img src="https://img.shields.io/badge/tests-75%2F75%20passing-success?labelColor=1a1a2e" alt="Tests" />
   <img src="https://img.shields.io/badge/docker-ready-blue?logo=docker&labelColor=1a1a2e" alt="Docker" />
   <img src="https://img.shields.io/badge/license-MIT-green?labelColor=1a1a2e" alt="License" />
 </p>
@@ -178,7 +178,6 @@ src/
 | `OWNER_ID` | *required* | Telegram user ID of the admin |
 | `ALLOWED_USERS` | `""` | Comma-separated user IDs |
 | `ALLOWED_GROUPS` | `""` | Comma-separated group IDs (negative) |
-| `MAX_FILE_SIZE_MB` | `50` | Maximum download size in megabytes |
 | `LOG_LEVEL` | `info` | Pino log level (trace → fatal) |
 | `PROXY_URL` | `""` | Manual proxy (takes priority, YouTube only). Supports http://, https://, socks5:// |
 | `PROXY_ENABLED` | `true` | Enable proxy pool (YouTube only). Proxies speed-tested, fastest used first |
@@ -258,8 +257,8 @@ bun run build
 | **URL Utils** | 16 | Validation, sanitization, platform detection |
 | **Format Utils** | 13 | File size, duration, progress bar rendering |
 | **Admin Output** | 6 | Formatted message structure |
-| **Limits** | 3 | File size enforcement |
-| **Total** | **74** | All passing |
+| **Limits** | 2 | Free-disk-space guard |
+| **Total** | **75** | All passing |
 
 ---
 

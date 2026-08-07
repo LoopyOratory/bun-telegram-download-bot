@@ -13,7 +13,6 @@ describe("envSchema", () => {
       ALLOWED_USERS: "123456789,987654321",
       ALLOWED_GROUPS: "-1001234567890,-1009876543210",
       TEMP_DIR: "/tmp/bun-video-bot",
-      MAX_FILE_SIZE_MB: "50",
       LOG_LEVEL: "info",
       DATABASE_PATH: "./data/bot.db",
     });
@@ -22,7 +21,6 @@ describe("envSchema", () => {
     expect(env.OWNER_ID).toBe(123456789);
     expect(env.ALLOWED_USERS).toEqual([123456789, 987654321]);
     expect(env.ALLOWED_GROUPS).toEqual([-1001234567890, -1009876543210]);
-    expect(env.MAX_FILE_SIZE_MB).toBe(50);
     expect(env.LOG_LEVEL).toBe("info");
   });
 
@@ -35,7 +33,6 @@ describe("envSchema", () => {
     expect(env.ALLOWED_USERS).toEqual([]);
     expect(env.ALLOWED_GROUPS).toEqual([]);
     expect(env.TEMP_DIR).toBe("/tmp/bun-video-bot");
-    expect(env.MAX_FILE_SIZE_MB).toBe(50);
     expect(env.LOG_LEVEL).toBe("info");
     expect(env.DATABASE_PATH).toBe("./data/bot.db");
   });
@@ -58,11 +55,9 @@ describe("envSchema", () => {
     const env = envSchema.parse({
       BOT_TOKEN: "123:abc",
       OWNER_ID: "42",
-      MAX_FILE_SIZE_MB: "100",
     });
 
     expect(env.OWNER_ID).toBe(42);
-    expect(env.MAX_FILE_SIZE_MB).toBe(100);
   });
 
   test("handles empty ALLOWED_USERS", () => {
