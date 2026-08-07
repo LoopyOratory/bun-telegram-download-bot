@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/runtime-Bun-ff69b4?logo=bun&labelColor=1a1a2e" alt="Bun" />
-  <img src="https://img.shields.io/badge/tests-75%2F75%20passing-success?labelColor=1a1a2e" alt="Tests" />
+  <img src="https://img.shields.io/badge/tests-78%2F78%20passing-success?labelColor=1a1a2e" alt="Tests" />
   <img src="https://img.shields.io/badge/docker-ready-blue?logo=docker&labelColor=1a1a2e" alt="Docker" />
   <img src="https://img.shields.io/badge/license-MIT-green?labelColor=1a1a2e" alt="License" />
 </p>
@@ -28,6 +28,7 @@
 - **🛡️ Authorized Access** — configurable allowlists for users and groups; banned users are silently dropped
 - **📊 Admin Dashboard** — 14 admin commands for stats, user management, moderation, and system maintenance
 - **🔥 Retry Logic** — automatic retries with exponential backoff for transient failures (timeouts, rate limits)
+- **📦 Auto-Compression** — files over Telegram's 50MB upload limit are live re-encoded with ffmpeg (no size cap on the download itself)
 - **🔌 Smart Proxy** — three-tier proxy system for YouTube only (other sites download direct). Proxies are speed-tested and sorted by latency; fastest is always used. Auto-rotates on failure.
 - **📈 Progress Tracking** — real-time download progress with animated status bar
 - **🐳 Docker Ready** — multi-stage Dockerfile with healthcheck and docker-compose for one-command deployment
@@ -258,7 +259,8 @@ bun run build
 | **Format Utils** | 13 | File size, duration, progress bar rendering |
 | **Admin Output** | 6 | Formatted message structure |
 | **Limits** | 2 | Free-disk-space guard |
-| **Total** | **75** | All passing |
+| **Compression** | 2 | Telegram upload-size bitrate planner |
+| **Total** | **78** | All passing |
 
 ---
 

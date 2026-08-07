@@ -35,6 +35,7 @@ describe("DownloadError", () => {
   test.each([
     "PRIVATE_VIDEO",
     "NO_DISK_SPACE",
+    "UPLOAD_LIMIT_EXCEEDED",
     "INVALID_URL",
     "PLATFORM_BLOCKED",
     "RATE_LIMITED",

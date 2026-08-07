@@ -1,8 +1,9 @@
-import { InputFile, InlineKeyboard } from "grammy";
+import { GrammyError, InputFile, InlineKeyboard } from "grammy";
 import { env } from "../config";
 import { logger } from "../utils/logger";
 import { validateUrlOrThrow, detectPlatform } from "../utils/url";
 import { downloadVideo, listFormats } from "../services/downloader";
+import { compressVideo } from "../services/compress";
 import { tracker } from "../services/tracker";
 import { cleanupFile } from "../cleanup";
 import { buildCompactProgress } from "../progress";
@@ -123,6 +124,7 @@ async function doDownload(
   );
 
   let result: DownloadResult | null = null;
+  let uploadedPath: string | null = null;
 
   try {
     const platform = detectPlatform(cleanedUrl);
@@ -147,9 +149,25 @@ async function doDownload(
 
     await ctx.api.editMessageText(chatId, statusMsgId, "🧩 Merging streams...");
     await ctx.api.editMessageText(chatId, statusMsgId, "📤 Uploading to Telegram...");
-    await ctx.api.sendVideo(chatId, new InputFile(result.filePath), {
-      supports_streaming: true,
-    });
+
+    uploadedPath = result.filePath;
+    try {
+      await ctx.api.sendVideo(chatId, new InputFile(uploadedPath), {
+        supports_streaming: true,
+      });
+    } catch (err) {
+      if (!(err instanceof GrammyError && err.error_code === 413)) throw err;
+      await ctx.api
+        .editMessageText(chatId, statusMsgId, "📦 Over Telegram's 50MB upload limit — compressing…")
+        .catch(() => {});
+      uploadedPath = await compressVideo(result.filePath, `${result.filePath}.small.mp4`);
+      await ctx.api
+        .editMessageText(chatId, statusMsgId, "📤 Uploading compressed file…")
+        .catch(() => {});
+      await ctx.api.sendVideo(chatId, new InputFile(uploadedPath), {
+        supports_streaming: true,
+      });
+    }
 
     await ctx.api.editMessageText(chatId, statusMsgId, "✅ Done!");
     await tracker.trackComplete(downloadId, result.fileSize, result.format, userId);
@@ -173,9 +191,8 @@ async function doDownload(
     }
   } finally {
     lastEditTime.delete(chatId);
-    if (result) {
-      await cleanupFile(result.filePath);
-    }
+    if (result) await cleanupFile(result.filePath);
+    if (uploadedPath && uploadedPath !== result?.filePath) await cleanupFile(uploadedPath);
   }
 }
 

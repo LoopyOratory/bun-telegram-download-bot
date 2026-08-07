@@ -46,6 +46,7 @@ const HELP_MESSAGE = [
   "",
   "**Limits:**",
   "• No upload size limit — download limited only by server disk space",
+  "• Files over 50MB are auto-compressed to fit Telegram's upload limit",
   "• 1 download at a time per user",
   "• 10s cooldown between downloads",
   "",
