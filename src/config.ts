@@ -50,6 +50,12 @@ export const envSchema = z.object({
     .string()
     .optional()
     .transform((v) => v?.trim() || undefined),
+  // Public base URL baked into the share link users open. Falls back to
+  // SHAREBOX_URL when unset (e.g. same hostname is publicly reachable).
+  SHAREBOX_PUBLIC_URL: z
+    .string()
+    .optional()
+    .transform((v) => v?.trim() || undefined),
   SHAREBOX_TOKEN: z
     .string()
     .optional()

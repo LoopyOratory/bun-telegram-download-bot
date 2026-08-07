@@ -26,6 +26,7 @@ export async function shareFile(
   token?: string,
   fileName?: string,
   expireDays = 1,
+  publicUrl?: string,
 ): Promise<ShareResult> {
   const file = Bun.file(filePath);
   const form = new FormData();
@@ -54,7 +55,7 @@ export async function shareFile(
     throw new DownloadError(DownloadErrorCode.UPLOAD_LIMIT_EXCEEDED, "Share service returned no share code");
   }
 
-  const link = `${trimBaseUrl(baseUrl)}/share/${code}`;
+  const link = `${trimBaseUrl(publicUrl ?? baseUrl)}/share/${code}`;
   logger.info({ code, size: file.size }, "File shared via file box");
   return { code, link };
 }

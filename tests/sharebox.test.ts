@@ -32,6 +32,12 @@ describe("shareFile", () => {
     expect(result).toEqual({ code: "K1T2Z", link: "http://box:12345/share/K1T2Z" });
   });
 
+  test("uses the public URL for the link when provided", async () => {
+    (globalThis as any).fetch = async () => new Response(JSON.stringify({ code: 200, detail: { code: "ABC" } }), { status: 200 });
+    const result = await shareFile(SRC, "http://internal:12345", undefined, undefined, undefined, "https://files.example.com");
+    expect(result.link).toBe("https://files.example.com/share/ABC");
+  });
+
   test("throws when the upload responds with an error", async () => {
     (globalThis as any).fetch = async () => new Response("nope", { status: 500 });
     try {

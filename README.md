@@ -185,6 +185,7 @@ src/
 | `PROXY_ENABLED` | `true` | Enable proxy pool (YouTube only). Proxies speed-tested, fastest used first |
 | `TOR_ENABLED` | `true` | Enable Tor fallback when pool empty (YouTube only, requires tor package) |
 | `SHAREBOX_URL` | `""` | Self-hosted FileCodeBox base URL; videos over Telegram's cap are shared via link + passcode |
+| `SHAREBOX_PUBLIC_URL` | `""` | Public base URL baked into share links (defaults to `SHAREBOX_URL`) |
 | `SHAREBOX_TOKEN` | `""` | FileCodeBox token if anonymous upload (openUpload) is disabled |
 | `COOKIES_STRING` | `""` | YouTube cookie string (takes priority over proxy). Export via `document.cookie` while signed in |
 | `TEMP_DIR` | `/tmp/bun-video-bot` | Temporary download directory |

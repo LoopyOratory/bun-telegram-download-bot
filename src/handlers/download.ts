@@ -5,6 +5,7 @@ import { validateUrlOrThrow, detectPlatform } from "../utils/url";
 import { downloadVideo, listFormats } from "../services/downloader";
 import { compressVideo, TELEGRAM_UPLOAD_LIMIT_BYTES } from "../services/compress";
 import { shareFile } from "../services/sharebox";
+import type { ShareResult } from "../services/sharebox";
 import { tracker } from "../services/tracker";
 import { cleanupFile } from "../cleanup";
 import { buildCompactProgress } from "../progress";
@@ -22,6 +23,15 @@ const lastEditTime = new Map<number, number>();
  * Keyed by a random ID passed in the callback data.
  */
 const pendingSelections = new Map<string, { url: string; chatId: number; formats: FormatInfo[]; statusMsgId: number }>();
+
+/**
+ * Upload a downloaded file to the configured FileCodeBox and return the share
+ * link + passcode. The link uses SHAREBOX_PUBLIC_URL so recipients can reach
+ * it even when the bot talks to the box on an internal address.
+ */
+async function shareViaBox(filePath: string): Promise<ShareResult> {
+  return shareFile(filePath, env.SHAREBOX_URL!, env.SHAREBOX_TOKEN, undefined, undefined, env.SHAREBOX_PUBLIC_URL);
+}
 
 /**
  * Handle an incoming video URL.
@@ -154,7 +164,7 @@ async function doDownload(
     if (env.SHAREBOX_URL && result.fileSize > TELEGRAM_UPLOAD_LIMIT_BYTES) {
       // Over Telegram's cap and a file box is configured — share a link instead of
       // sending inline (original quality, no encode wait).
-      const share = await shareFile(result.filePath, env.SHAREBOX_URL, env.SHAREBOX_TOKEN);
+      const share = await shareViaBox(result.filePath);
       await ctx.api.editMessageText(
         chatId,
         statusMsgId,
@@ -175,7 +185,7 @@ async function doDownload(
     } catch (err) {
       if (!(err instanceof GrammyError && err.error_code === 413)) throw err;
       if (env.SHAREBOX_URL) {
-        const share = await shareFile(result.filePath, env.SHAREBOX_URL, env.SHAREBOX_TOKEN);
+        const share = await shareViaBox(result.filePath);
         await ctx.api.editMessageText(
           chatId,
           statusMsgId,
