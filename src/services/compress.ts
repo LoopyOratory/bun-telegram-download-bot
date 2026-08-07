@@ -1,5 +1,5 @@
 import { spawn } from "bun";
-import { stat } from "node:fs/promises";
+import { stat, unlink } from "node:fs/promises";
 import { logger } from "../utils/logger";
 import { DownloadError, DownloadErrorCode } from "../types";
 
@@ -73,12 +73,18 @@ export async function compressVideo(
     if (attempt.filter) args.push("-vf", attempt.filter);
     args.push(outputPath);
 
-    await runFfmpeg(args);
-    const { size } = await stat(outputPath);
-    logger.info({ attempt: attempt.label, sizeBytes: size, targetBytes }, "Compression attempt finished");
-    if (size <= targetBytes) return outputPath;
+    try {
+      await runFfmpeg(args);
+      const { size } = await stat(outputPath);
+      logger.info({ attempt: attempt.label, sizeBytes: size, targetBytes }, "Compression attempt finished");
+      if (size <= targetBytes) return outputPath;
+    } catch (err) {
+      await unlink(outputPath).catch(() => {});
+      throw err;
+    }
   }
 
+  await unlink(outputPath).catch(() => {});
   throw new DownloadError(
     DownloadErrorCode.UPLOAD_LIMIT_EXCEEDED,
     "File still exceeds Telegram's 50MB upload limit after compression",
