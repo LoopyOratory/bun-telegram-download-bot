@@ -128,6 +128,41 @@ describe("shareFile (chunked)", () => {
     expect(initBody.file_name).toBe("sharebox-test-src.mp4");
   });
 
+  // Regression test: FileCodeBox dedups /chunk/upload/init/ by
+  // file_hash+file_size+file_name and resumes any existing partial session
+  // (e.g. left over from a crashed/interrupted prior attempt), returning
+  // THAT session's chunk_size/total_chunks — which can differ from what the
+  // client requested. The client must slice with the server's authoritative
+  // values, or chunk boundaries desync from what merge_chunks() expects and
+  // the reassembled file silently corrupts while the DB still shows the
+  // full declared file_size.
+  test("uses the server's authoritative chunk_size/total_chunks on a resumed session", async () => {
+    // Server resumed an old session that used a 4-byte chunk size (3 chunks
+    // for a 16-byte file), even though the client asked for CHUNK_SIZE.
+    const resumedInitRes = () =>
+      jsonResponse({ code: 200, detail: { existed: false, upload_id: "resumed1", chunk_size: 4, total_chunks: 4, uploaded_chunks: [] } });
+
+    const chunkSizes: number[] = [];
+    (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith("/chunk/upload/init/")) return resumedInitRes();
+      if (u.includes("/chunk/upload/chunk/")) {
+        const form = init?.body as FormData;
+        const chunk = form.get("chunk") as File;
+        chunkSizes.push(chunk.size);
+        return chunkRes();
+      }
+      if (u.includes("/chunk/upload/complete/")) return completeRes();
+      throw new Error(`unexpected url ${u}`);
+    };
+
+    await shareFile(SRC, { baseUrl: "http://box:12345", forceChunked: true });
+
+    // SRC is 16 bytes ("fake video bytes") — with the server's 4-byte
+    // chunk_size that's 4 chunks of 4 bytes each, not CHUNK_SIZE-sized ones.
+    expect(chunkSizes).toEqual([4, 4, 4, 4]);
+  });
+
   test("falls back to chunked when the proxy rejects the single-shot upload", async () => {
     (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
       const u = String(url);

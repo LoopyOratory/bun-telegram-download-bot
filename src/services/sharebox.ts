@@ -53,7 +53,13 @@ interface ShareFile {
 
 interface ApiResponse {
   code?: number;
-  detail?: { code?: string; upload_id?: string; total_chunks?: number; [k: string]: unknown };
+  detail?: {
+    code?: string;
+    upload_id?: string;
+    chunk_size?: number;
+    total_chunks?: number;
+    [k: string]: unknown;
+  };
 }
 
 async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
@@ -104,7 +110,6 @@ async function chunkedUpload(
   const size = file.size;
   const buffer = await file.arrayBuffer();
   const hash = await sha256Hex(buffer);
-  const totalChunks = Math.ceil(size / CHUNK_SIZE);
   const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   const initRes = await fetch(`${baseUrl}/chunk/upload/init/`, {
@@ -117,10 +122,21 @@ async function chunkedUpload(
   const uploadId = initBody.detail?.upload_id;
   if (!uploadId) throw fail("Share service returned no upload id");
 
+  // FileCodeBox dedups init requests by file_hash+file_size+file_name and
+  // resumes any existing partial session (e.g. left over from a prior
+  // crashed/interrupted upload) — returning THAT session's chunk_size and
+  // total_chunks, which can differ from what we just requested. The server
+  // reassembles the file using those authoritative boundaries, not ours, so
+  // slicing with our own CHUNK_SIZE on a resumed session desyncs the chunk
+  // indices from what merge_chunks() expects and silently corrupts the
+  // reassembled file while the DB still records the correct file_size.
+  const chunkSize = initBody.detail?.chunk_size ?? CHUNK_SIZE;
+  const totalChunks = initBody.detail?.total_chunks ?? Math.ceil(size / chunkSize);
+
   try {
     for (let i = 0; i < totalChunks; i++) {
-      const start = i * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, size);
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize, size);
       const chunkForm = new FormData();
       chunkForm.append("chunk", new File([buffer.slice(start, end)], `chunk-${i}`));
       const chunkRes = await fetch(`${baseUrl}/chunk/upload/chunk/${uploadId}/${i}`, {

@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/runtime-Bun-ff69b4?logo=bun&labelColor=1a1a2e" alt="Bun" />
-  <img src="https://img.shields.io/badge/tests-88%2F88%20passing-success?labelColor=1a1a2e" alt="Tests" />
+  <img src="https://img.shields.io/badge/tests-89%2F89%20passing-success?labelColor=1a1a2e" alt="Tests" />
   <img src="https://img.shields.io/badge/docker-ready-blue?logo=docker&labelColor=1a1a2e" alt="Docker" />
   <img src="https://img.shields.io/badge/license-MIT-green?labelColor=1a1a2e" alt="License" />
 </p>
@@ -269,9 +269,9 @@ bun run build
 | **Admin Output** | 6 | Formatted message structure |
 | **Limits** | 2 | Free-disk-space guard |
 | **Compression** | 2 | Telegram upload-size bitrate planner |
-| **File Box** | 8 | Share client: single-shot + chunked, proxy-reject fallback, basename filename regression |
+| **File Box** | 9 | Share client: single-shot + chunked, proxy-reject fallback, basename filename regression, resumed-session chunk-size regression |
 | **Downloader** | 9 | yt-dlp arg building (audio-merge format selector), progress parsing, error classification |
-| **Total** | **88** | All passing |
+| **Total** | **89** | All passing |
 
 ---
 
