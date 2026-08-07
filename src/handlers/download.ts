@@ -3,7 +3,8 @@ import { env } from "../config";
 import { logger } from "../utils/logger";
 import { validateUrlOrThrow, detectPlatform } from "../utils/url";
 import { downloadVideo, listFormats } from "../services/downloader";
-import { compressVideo } from "../services/compress";
+import { compressVideo, TELEGRAM_UPLOAD_LIMIT_BYTES } from "../services/compress";
+import { shareFile } from "../services/sharebox";
 import { tracker } from "../services/tracker";
 import { cleanupFile } from "../cleanup";
 import { buildCompactProgress } from "../progress";
@@ -150,6 +151,22 @@ async function doDownload(
     await ctx.api.editMessageText(chatId, statusMsgId, "🧩 Merging streams...");
     await ctx.api.editMessageText(chatId, statusMsgId, "📤 Uploading to Telegram...");
 
+    if (env.SHAREBOX_URL && result.fileSize > TELEGRAM_UPLOAD_LIMIT_BYTES) {
+      // Over Telegram's cap and a file box is configured — share a link instead of
+      // sending inline (original quality, no encode wait).
+      const share = await shareFile(result.filePath, env.SHAREBOX_URL, env.SHAREBOX_TOKEN);
+      await ctx.api.editMessageText(
+        chatId,
+        statusMsgId,
+        `📎 **File too large for Telegram** (${(result.fileSize / 1024 / 1024).toFixed(0)} MB).\n\n` +
+          `📦 Grab it here: ${share.link}\n` +
+          `🔑 Passcode: \`${share.code}\`\n\n` +
+          `Expires in 1 day.`,
+      );
+      await tracker.trackComplete(downloadId, result.fileSize, result.format, userId);
+      return;
+    }
+
     uploadedPath = result.filePath;
     try {
       await ctx.api.sendVideo(chatId, new InputFile(uploadedPath), {
@@ -157,16 +174,25 @@ async function doDownload(
       });
     } catch (err) {
       if (!(err instanceof GrammyError && err.error_code === 413)) throw err;
-      await ctx.api
-        .editMessageText(chatId, statusMsgId, "📦 Over Telegram's 50MB upload limit — compressing…")
-        .catch(() => {});
-      uploadedPath = await compressVideo(result.filePath, `${result.filePath}.small.mp4`);
-      await ctx.api
-        .editMessageText(chatId, statusMsgId, "📤 Uploading compressed file…")
-        .catch(() => {});
-      await ctx.api.sendVideo(chatId, new InputFile(uploadedPath), {
-        supports_streaming: true,
-      });
+      if (env.SHAREBOX_URL) {
+        const share = await shareFile(result.filePath, env.SHAREBOX_URL, env.SHAREBOX_TOKEN);
+        await ctx.api.editMessageText(
+          chatId,
+          statusMsgId,
+          `📎 **File too large for Telegram.**\n\n📦 Grab it here: ${share.link}\n🔑 Passcode: \`${share.code}\``,
+        );
+      } else {
+        await ctx.api
+          .editMessageText(chatId, statusMsgId, "📦 Over Telegram's 50MB upload limit — compressing…")
+          .catch(() => {});
+        uploadedPath = await compressVideo(result.filePath, `${result.filePath}.small.mp4`);
+        await ctx.api
+          .editMessageText(chatId, statusMsgId, "📤 Uploading compressed file…")
+          .catch(() => {});
+        await ctx.api.sendVideo(chatId, new InputFile(uploadedPath), {
+          supports_streaming: true,
+        });
+      }
     }
 
     await ctx.api.editMessageText(chatId, statusMsgId, "✅ Done!");

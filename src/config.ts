@@ -44,6 +44,16 @@ export const envSchema = z.object({
     .string()
     .default("true")
     .transform((v) => v === "true" || v === "1"),
+
+  // FileCodeBox file-sharing fallback for videos over Telegram's upload cap.
+  SHAREBOX_URL: z
+    .string()
+    .optional()
+    .transform((v) => v?.trim() || undefined),
+  SHAREBOX_TOKEN: z
+    .string()
+    .optional()
+    .transform((v) => v?.trim() || undefined),
 });
 
 /** Parsed environment configuration — fails fast at startup if invalid */
