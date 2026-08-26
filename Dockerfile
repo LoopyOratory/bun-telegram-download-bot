@@ -2,7 +2,7 @@
 # Hermes Video Bot — Multi-stage Dockerfile
 # =============================================================================
 # Stage 1: Bun install (dependencies only, cached layer)
-FROM oven/bun:1.3 AS deps
+FROM oven/bun:1.4 AS deps
 
 WORKDIR /app
 
@@ -24,7 +24,7 @@ RUN bun build src/index.ts --compile --outfile /app/bun-video-bot 2>/dev/null ||
 
 # =============================================================================
 # Stage 3: Production runtime
-FROM oven/bun:1.3-slim AS production
+FROM oven/bun:1.4-slim AS production
 
 LABEL org.opencontainers.image.title="Hermes Video Bot"
 LABEL org.opencontainers.image.description="Telegram video downloader bot"
