@@ -3,177 +3,131 @@ import { createConnection } from "node:net";
 import { env } from "../config";
 import { logger } from "../utils/logger";
 
-const PROXY_LIST_URL =
-  "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt";
-
-const TEST_URL = "https://www.google.com";
-const TEST_TIMEOUT_MS = 5_000;
+const PROXY_LIST_URL = "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt";
+const TEST_URL = "https://www.youtube.com/robots.txt";
 const POOL_REFRESH_MS = 10 * 60 * 1000;
 const POOL_TARGET_SIZE = 10;
-const POOL_MIN_SIZE = 3;
-const BATCH_TEST_SIZE = 30;
+const POOL_TRY_LIMIT = 2;
+const BATCH_TEST_SIZE = 20;
+const MAX_CANDIDATES = 120;
 
-/** Tor runs a SOCKS5 listener on 127.0.0.1:9050 by default. */
-const TOR_HOST = "127.0.0.1";
-const TOR_PORT = 9050;
-const TOR_PROBE_TIMEOUT_MS = 1_500;
-
-let proxyPool: string[] = [];
-let refreshTimer: ReturnType<typeof setInterval> | null = null;
-let torAvailable: boolean | null = null;
-
-async function fetchProxyList(): Promise<string[]> {
-  const response = await fetch(PROXY_LIST_URL);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch proxy list: ${response.status}`);
-  }
-  const text = await response.text();
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"));
+export interface DownloadRoute {
+  kind: "direct" | "manual" | "pool" | "tor";
+  proxy: string;
 }
 
-async function testProxy(proxy: string): Promise<{ proxy: string; latencyMs: number } | null> {
+const direct: DownloadRoute = { kind: "direct", proxy: "" };
+let proxyPool: string[] = [];
+let refreshTimer: ReturnType<typeof setInterval> | undefined;
+let refreshing = false;
+let torAvailable = false;
+
+async function fetchProxyList(): Promise<string[]> {
+  const response = await fetch(PROXY_LIST_URL, { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`Proxy list returned HTTP ${response.status}`);
+
+  const lines = (await response.text()).split("\n").map((line) => line.trim());
+  // Use remote DNS for SOCKS proxies, as yt-dlp does during the actual download.
+  const candidates = lines
+    .filter((line) => /^(?:https?|socks5h?):\/\/[^\s]+$/i.test(line))
+    .map((line) => line.replace(/^socks5:\/\//i, "socks5h://"));
+  return Array.from(new Set(candidates));
+}
+
+async function testProxy(proxy: string): Promise<number> {
   try {
     const start = Date.now();
     const proc = spawn([
-      "curl",
-      "-s", "-o", "/dev/null",
-      "-w", "%{http_code}",
-      "--proxy", proxy,
-      "--max-time", String(TEST_TIMEOUT_MS / 1000),
-      TEST_URL,
-    ], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-
-    const stdout = await new Response(proc.stdout).text();
-    const exitCode = await proc.exited;
-    const latencyMs = Date.now() - start;
-
-    if (exitCode !== 0) return null;
-    const code = parseInt(stdout.trim(), 10);
-    if (code >= 200 && code < 400) {
-      return { proxy, latencyMs };
-    }
-    return null;
+      "curl", "--disable", "--silent", "--fail", "--output", "/dev/null",
+      "--proxy", proxy, "--noproxy", "", "--max-time", "5", TEST_URL,
+    ], { stdout: "ignore", stderr: "ignore" });
+    return (await proc.exited) === 0 ? Date.now() - start : Infinity;
   } catch {
-    return null;
+    return Infinity;
   }
 }
 
 async function buildPool(): Promise<void> {
   try {
-    const allProxies = await fetchProxyList();
-    const candidates = allProxies.sort(() => Math.random() - 0.5);
-
-    const tested: { proxy: string; latencyMs: number }[] = [];
+    const candidates = (await fetchProxyList())
+      .map((proxy) => ({ proxy, order: Math.random() }))
+      .sort((a, b) => a.order - b.order)
+      .slice(0, MAX_CANDIDATES);
+    const tested: Array<{ proxy: string; latency: number }> = [];
 
     for (let i = 0; i < candidates.length && tested.length < POOL_TARGET_SIZE; i += BATCH_TEST_SIZE) {
       const batch = candidates.slice(i, i + BATCH_TEST_SIZE);
-      const results = await Promise.all(batch.map(testProxy));
-
-      for (const r of results) {
-        if (r) tested.push(r);
-        if (tested.length >= POOL_TARGET_SIZE) break;
-      }
+      const results = await Promise.all(batch.map(async ({ proxy }) => ({ proxy, latency: await testProxy(proxy) })));
+      tested.push(...results.filter(({ latency }) => Number.isFinite(latency)));
     }
 
-    if (tested.length > 0) {
-      tested.sort((a, b) => a.latencyMs - b.latencyMs);
-      proxyPool = tested.map((t) => t.proxy);
-      logger.info(
-        { poolSize: proxyPool.length, fastestMs: tested[0].latencyMs, slowestMs: tested[tested.length - 1].latencyMs },
-        "Proxy pool built (sorted by speed)",
-      );
-    } else if (proxyPool.length === 0) {
-      logger.warn("Proxy pool is empty — all proxies failed testing");
-    } else {
-      logger.warn({ poolSize: proxyPool.length }, "Proxy refresh found no working proxies — keeping existing pool");
-    }
+    proxyPool = tested.sort((a, b) => a.latency - b.latency)
+      .slice(0, POOL_TARGET_SIZE)
+      .map(({ proxy }) => proxy);
+    logger.info({ poolSize: proxyPool.length }, "Refreshed YouTube proxy pool");
   } catch (err) {
-    logger.error({ err }, "Failed to build proxy pool");
+    proxyPool = [];
+    logger.warn({ err }, "Could not refresh YouTube proxy pool");
   }
 }
 
-async function probeTor(): Promise<boolean> {
+function probeTor(): Promise<boolean> {
+  const endpoint = new URL(env.TOR_PROXY_URL);
   return new Promise((resolve) => {
-    const socket = createConnection({ host: TOR_HOST, port: TOR_PORT });
-    socket.setTimeout(TOR_PROBE_TIMEOUT_MS);
-    socket.once("connect", () => {
+    const socket = createConnection({ host: endpoint.hostname.replace(/^\[|\]$/g, ""), port: Number(endpoint.port || 1080) });
+    const finish = (available: boolean) => {
       socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.once("timeout", () => {
-      socket.destroy();
-      resolve(false);
-    });
+      resolve(available);
+    };
+    socket.setTimeout(1_500, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
   });
 }
 
+async function refreshRoutes(): Promise<void> {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    await Promise.all([
+      env.PROXY_ENABLED && buildPool(),
+      env.TOR_ENABLED && probeTor().then((available) => { torAvailable = available; }),
+    ]);
+  } finally {
+    refreshing = false;
+  }
+}
+
 export async function initProxyPool(): Promise<void> {
-  if (!env.PROXY_ENABLED || env.PROXY_URL) {
-    logger.info("Proxy pool disabled (manual PROXY_URL or PROXY_ENABLED=false)");
-    return;
-  }
-
-  logger.info("Initializing proxy pool...");
-  await buildPool();
-
-  if (env.TOR_ENABLED) {
-    torAvailable = await probeTor();
-    logger.info({ torAvailable }, "Tor availability probed");
-  } else {
-    torAvailable = false;
-  }
-
-  if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(buildPool, POOL_REFRESH_MS);
+  if ((!env.PROXY_ENABLED && !env.TOR_ENABLED) || refreshTimer) return;
+  refreshTimer = setInterval(() => void refreshRoutes(), POOL_REFRESH_MS);
+  refreshTimer.unref();
+  await refreshRoutes();
 }
 
-export function getProxy(): string | null {
-  if (env.PROXY_URL) {
-    return env.PROXY_URL;
-  }
+export function getDownloadRoutes(platform: string): DownloadRoute[] {
+  if (platform !== "youtube") return [direct];
 
-  if (!env.PROXY_ENABLED) {
-    return null;
+  const routes: DownloadRoute[] = [];
+  if (env.PROXY_URL) routes.push({ kind: "manual", proxy: env.PROXY_URL });
+  routes.push(direct);
+  if (env.PROXY_ENABLED) {
+    const pool = proxyPool.filter((proxy) => proxy !== env.PROXY_URL && proxy !== env.TOR_PROXY_URL);
+    routes.push(...pool.slice(0, POOL_TRY_LIMIT).map((proxy): DownloadRoute => ({ kind: "pool", proxy })));
   }
-
-  if (proxyPool.length === 0) {
-    return null;
+  if (env.TOR_ENABLED && torAvailable && env.TOR_PROXY_URL !== env.PROXY_URL) {
+    routes.push({ kind: "tor", proxy: env.TOR_PROXY_URL });
   }
-
-  return proxyPool[0];
+  return routes;
 }
 
-export function reportFailure(proxy: string): void {
-  if (env.PROXY_URL) return;
-
-  const idx = proxyPool.indexOf(proxy);
-  if (idx !== -1) {
-    proxyPool.splice(idx, 1);
-    logger.warn({ proxy, remainingPool: proxyPool.length }, "Proxy removed from pool after failure");
+export function reportRouteFailure(route: DownloadRoute): void {
+  if (route.kind === "pool") {
+    proxyPool = proxyPool.filter((proxy) => proxy !== route.proxy);
   }
-}
-
-export function isTorAvailable(): boolean {
-  return env.TOR_ENABLED && torAvailable === true;
-}
-
-export function getTorArgs(): string[] {
-  return ["--proxy", `socks5://${TOR_HOST}:${TOR_PORT}`];
 }
 
 export function shutdown(): void {
-  if (refreshTimer) {
-    clearInterval(refreshTimer);
-    refreshTimer = null;
-  }
+  clearInterval(refreshTimer);
+  refreshTimer = undefined;
 }

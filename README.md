@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/runtime-Bun-ff69b4?logo=bun&labelColor=1a1a2e" alt="Bun" />
-  <img src="https://img.shields.io/badge/tests-89%2F89%20passing-success?labelColor=1a1a2e" alt="Tests" />
+  <img src="https://img.shields.io/badge/tests-90%2F90%20passing-success?labelColor=1a1a2e" alt="Tests" />
   <img src="https://img.shields.io/badge/docker-ready-blue?logo=docker&labelColor=1a1a2e" alt="Docker" />
   <img src="https://img.shields.io/badge/license-MIT-green?labelColor=1a1a2e" alt="License" />
 </p>
@@ -29,8 +29,8 @@
 - **📊 Admin Dashboard** — 14 admin commands for stats, user management, moderation, and system maintenance
 - **🔥 Retry Logic** — automatic retries with exponential backoff for transient failures (timeouts, rate limits)
 - **📦 Auto-Compression** — files over Telegram's 50MB upload limit are live re-encoded with ffmpeg (no size cap on the download itself)
-- **📦 File Box Share** — videos over the Telegram 50MB cap are uploaded to your self-hosted FileCodeBox and shared as a link + passcode (original quality). Chunked uploads pass reverse-proxy body caps (e.g. Cloudflare's 100MB).
-- **🔌 Smart Proxy** — three-tier proxy system for YouTube only (other sites download direct). Proxies are speed-tested and sorted by latency; fastest is always used. Auto-rotates on failure.
+- **📦 File Box Share** — videos over the Telegram 50MB cap are uploaded to your self-hosted FileCodeBox and shared as a link and passcode at the downloaded resolution. Chunked uploads pass reverse-proxy body caps (e.g. Cloudflare's 100MB).
+- **🔌 YouTube failover** — tries a configured proxy, direct access, up to two tested public proxies, and a reachable Tor SOCKS listener.
 - **⚡ aria2 Acceleration** — optional multi-connection download backend for yt-dlp (`ARIA2_ENABLED`); yt-dlp still handles site extraction, aria2 just speeds up the transfer
 - **📈 Progress Tracking** — live animated progress bar for both the download and the Telegram upload itself (no more silent "Uploading..." with no feedback)
 - **🐳 Docker Ready** — multi-stage Dockerfile with healthcheck and docker-compose for one-command deployment
@@ -43,8 +43,8 @@
 ### Prerequisites
 
 - **Bun** ≥ 1.3 (or Docker)
-- **yt-dlp** ≥ 2024 (auto-installed in Docker)
-- **FFmpeg** (auto-installed in Docker)
+- **yt-dlp** with its YouTube challenge solver (install or update with `pip install -U "yt-dlp[default]"`)
+- **Deno** ≥ 2.3 for yt-dlp and **FFmpeg** with `ffprobe` for media processing. Docker includes both. [yt-dlp YouTube setup](https://github.com/yt-dlp/yt-dlp/wiki/EJS)
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
 
 ### 1. Clone & Configure
@@ -69,7 +69,7 @@ ALLOWED_GROUPS=-1001234567890
 ### 2. Run
 
 ```bash
-# Native (needs Bun + yt-dlp + ffmpeg installed)
+# Native (with the prerequisites installed)
 bun install
 bun run dev
 
@@ -130,8 +130,8 @@ https://www.tiktok.com/@user/video/123456789
 User sends URL
   → Auth middleware (check ALLOWED_USERS/GROUPS + ban list)
   → Rate limiter (1 concurrent, 10s cooldown)
-  → Proxy resolution (YouTube only): PROXY_URL → speed-tested pool (fastest first) → Tor → direct
-  → yt-dlp download (--proxy or --tor or direct; Bun.spawn, no shell injection)
+  → YouTube route selection (manual proxy → direct → tested public proxies → Tor)
+  → yt-dlp download and merge → verify video and audio tracks → prepare playable MP4
   → Progress bar (live Telegram message edits, 2s throttle)
   → sendVideo (file uploaded to Telegram)
   → immediately unlink(filePath) — file gone
@@ -183,24 +183,26 @@ src/
 | `ALLOWED_GROUPS` | `""` | Comma-separated group IDs (negative) |
 | `LOG_LEVEL` | `info` | Pino log level (trace → fatal) |
 | `PROXY_URL` | `""` | Manual proxy (takes priority, YouTube only). Supports http://, https://, socks5:// |
-| `PROXY_ENABLED` | `true` | Enable proxy pool (YouTube only). Proxies speed-tested, fastest used first |
-| `TOR_ENABLED` | `true` | Enable Tor fallback when pool empty (YouTube only, requires tor package) |
-| `ARIA2_ENABLED` | `false` | Use `aria2c` as yt-dlp's download backend for faster multi-connection transfers (requires the `aria2` package) |
+| `PROXY_ENABLED` | `true` | Enable public proxy discovery and fallback for YouTube |
+| `TOR_ENABLED` | `true` | Try a reachable Tor SOCKS listener as the final YouTube route |
+| `TOR_PROXY_URL` | `socks5h://127.0.0.1:9050` | Address of a running Tor SOCKS listener, as seen by the bot |
+| `ARIA2_ENABLED` | `false` | Use `aria2c` for direct transfers (requires the `aria2` package). YouTube DASH and HLS transfers use yt-dlp's native downloader |
 | `SHAREBOX_URL` | `""` | Self-hosted FileCodeBox base URL; videos over the size threshold are shared via link + passcode |
 | `SHAREBOX_PUBLIC_URL` | `""` | Public base URL baked into share links (defaults to `SHAREBOX_URL`) |
 | `SHAREBOX_MIN_SIZE_MB` | `49.99` | Files at/above this size go to the file box; smaller send inline |
 | `SHAREBOX_TOKEN` | `""` | FileCodeBox token if anonymous upload (openUpload) is disabled |
-| `COOKIES_STRING` | `""` | YouTube cookie string (takes priority over proxy). Export via `document.cookie` while signed in |
 | `TEMP_DIR` | `/tmp/bun-video-bot` | Temporary download directory |
-| `DOWNLOAD_TIMEOUT_SECONDS` | `3600` | Total budget for one download (large files need more than 5 min) |
+| `DOWNLOAD_TIMEOUT_SECONDS` | `3600` | Total time for all download attempts and YouTube media preparation |
 | `DATABASE_PATH` | `./data/bot.db` | SQLite database location |
 | `NODE_ENV` | `development` | Environment (development/production/test) |
 
 ### Proxy Resolution Order
 
-<p align="center">
-  <img src="docs/diagrams/proxy.drawio.png" alt="Proxy Priority Chain" width="75%" />
-</p>
+Each YouTube request tries `PROXY_URL` when configured, then direct access, up to two public proxies tested against YouTube, and Tor if its SOCKS listener is reachable. Format lookup uses the same route order. Public proxy checks establish basic connectivity, and YouTube may still reject a video request on those routes. Set `PROXY_ENABLED=false` to turn off public proxy discovery.
+
+For Tor, start a SOCKS listener reachable from the bot. In Docker, set `TOR_PROXY_URL` to the listener's address on the container network.
+
+YouTube format selection prefers H.264 video and AAC audio. The bot checks for both tracks before delivery and prepares a compatible MP4 when needed. Set `SHAREBOX_URL` to share over-limit videos at their downloaded resolution. Without a FileCodeBox, the bot attempts compression within Telegram's upload limit.
 
 ---
 
@@ -210,8 +212,9 @@ src/
 # Build
 docker build -t bun-video-bot .
 
-# Run with docker compose
-docker compose up -d
+# Rebuild and run with the production Compose configuration
+mkdir -p data
+docker compose -f docker-compose.yml up -d --build
 
 # View logs
 docker compose logs -f
@@ -222,9 +225,8 @@ docker compose down
 
 The Docker image includes:
 - **Bun 1.3** runtime (slim base, ~130MB)
-- **yt-dlp** (latest via pip, with `--break-system-packages`)
-- **FFmpeg 7.1** (for DASH stream merging)
-- **Tor** (for anonymous fallback when proxies fail)
+- **yt-dlp**, the YouTube challenge solver, and **Deno**
+- **FFmpeg** and **ffprobe** for merging, verification, and compression
 - **aria2** (optional yt-dlp download backend, `ARIA2_ENABLED=true`)
 - **Healthcheck** every 30s
 - **Auto-restart** on crash (`unless-stopped`)
@@ -270,14 +272,14 @@ bun run build
 | **Limits** | 2 | Free-disk-space guard |
 | **Compression** | 2 | Telegram upload-size bitrate planner |
 | **File Box** | 9 | Share client: single-shot + chunked, proxy-reject fallback, basename filename regression, resumed-session chunk-size regression |
-| **Downloader** | 9 | yt-dlp arg building (audio-merge format selector), progress parsing, error classification |
+| **Downloader** | 9 | YouTube format selection, proxy failover, audio verification, and error classification |
 | **Total** | **89** | All passing |
 
 ---
 
 ## 🔒 Security
 
-- **No shell injection** — `Bun.spawn()` with array arguments only; user input is never interpolated into commands
+- **No shell injection** — Subprocess commands use argument arrays; user input is never interpolated into commands
 - **URL validation** — rejects non-HTTP schemes (`file://`, `javascript:`, etc.), null bytes, and shell metacharacters
 - **Auth middleware** — every message checked against `ALLOWED_USERS`/`ALLOWED_GROUPS` before processing
 - **Ban system** — banned users are silently ignored at the middleware level

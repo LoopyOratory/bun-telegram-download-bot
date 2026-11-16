@@ -78,7 +78,8 @@ export async function compressVideo(
     const bitrate = durationSec ? computeVideoBitrate(durationSec, targetBytes) : 800_000;
     const args = [
       "-i", inputPath,
-      "-c:v", "libx264", "-preset", "veryfast",
+      "-map", "0:V:0", "-map", "0:a:0?",
+      "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
       "-b:v", String(bitrate),
       "-maxrate", String(Math.round(bitrate * 1.3)),
       "-bufsize", String(bitrate * 2),

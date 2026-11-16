@@ -1,5 +1,6 @@
-import { spawn } from "bun";
-import { mkdir } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, readdir, stat, unlink } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { env } from "../config";
 import { logger } from "../utils/logger";
 import {
@@ -9,21 +10,30 @@ import {
   RETRY_DELAY_BASE_MS,
 } from "../utils/limits";
 import { detectPlatform } from "../utils/url";
-import { getProxy, reportFailure, getTorArgs, isTorAvailable } from "./proxy";
-import {
-  DownloadError,
-  DownloadErrorCode,
-  type ProgressEvent,
-  type DownloadResult,
-  type FormatInfo,
-} from "../types";
+import { getDownloadRoutes, reportRouteFailure, type DownloadRoute } from "./proxy";
+import { DownloadError, DownloadErrorCode, type ProgressEvent, type DownloadResult, type FormatInfo } from "../types";
 
-/** Regex to parse yt-dlp progress line */
-const PROGRESS_REGEX =
-  /\[download\]\s+(\d+\.?\d*)%.*?at\s+([\d.]+[KMG]?i?B\/s).*?ETA\s+(\d+:\d+)/i;
+const PROGRESS_REGEX = /\[download\]\s+(\d+\.?\d*)%.*?at\s+([\d.]+[KMG]?i?B\/s).*?ETA\s+(\d+:\d+)/i;
+const LIST_TIMEOUT_MS = 25_000;
+const OUTPUT_MARKER = "final-file:";
 
-function shouldProxyPlatform(platform: string): boolean {
-  return platform === "youtube";
+function youtubeFormat(height?: number): string {
+  const filter = height === undefined ? "" : `[height=${height}]`;
+  return [
+    `bv${filter}[vcodec^=avc1]+ba[acodec^=mp4a]`,
+    `b${filter}[vcodec^=avc1][acodec^=mp4a]`,
+    `bv${filter}+ba`,
+    `b${filter}`,
+  ].join("/");
+}
+
+function commonArgs(platform: string, proxy: string): string[] {
+  const args = [
+    "--no-playlist", "--no-cache-dir",
+    "--proxy", proxy, "--socket-timeout", "8",
+  ];
+  if (platform === "tiktok") args.push("--extractor-args", "tiktok:no_watermark=true");
+  return args;
 }
 
 interface SpawnOptions {
@@ -32,127 +42,192 @@ interface SpawnOptions {
   platform: string;
 }
 
-/**
- * Build yt-dlp arguments for a given platform.
- */
-export function buildYtDlpArgs({ url, outputPath, platform }: SpawnOptions, formatCode?: string): string[] {
-  // Merge separate video+audio streams FIRST. "best" alone picks whichever
-  // single format yt-dlp considers highest quality — on platforms that don't
-  // publish a combined audio+video stream at top quality, that "best" match
-  // is video-only, so the video ships with no sound. Putting the explicit
-  // bestvideo+bestaudio merge ahead of the single-stream fallback guarantees
-  // an audio track whenever separate streams exist.
-  const fmt = formatCode || "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best";
+export function buildYtDlpArgs(
+  { url, outputPath, platform }: SpawnOptions,
+  formatCode?: string,
+  route = getDownloadRoutes(platform)[0],
+  useAria2 = env.ARIA2_ENABLED && route.kind === "direct",
+): string[] {
+  const youtube = platform === "youtube";
+  const format = formatCode || (youtube
+    ? youtubeFormat()
+    : "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best");
   const args = [
-    url,
-    "-f", fmt,
-    "-o", outputPath,
-    "--no-playlist",
-    "--no-cache-dir",
-    "--newline",
-    "--no-warnings",
-    "--remux-video", "mp4",
+    ...commonArgs(platform, route.proxy),
+    "-f", format, "-o", outputPath,
+    "--newline", "--progress", "--no-simulate",
+    "--print", `after_move:${OUTPUT_MARKER}%(filepath)j`,
+    "--retries", "2", "--fragment-retries", "3",
   ];
+  if (youtube) args.push("--abort-on-unavailable-fragments", "--merge-output-format", "mp4/mkv");
+  else args.push("--remux-video", "mp4");
 
-  // Platform-specific args
-  if (platform === "tiktok") {
-    args.push("--extractor-args", "tiktok:no_watermark=true");
-  }
-
-  // Proxy args (YouTube only — other platforms don't need it)
-  if (shouldProxyPlatform(platform)) {
-    const proxy = getProxy();
-    if (proxy) {
-      args.push("--proxy", proxy);
-    } else if (isTorAvailable()) {
-      args.push(...getTorArgs());
-    }
-  }
-
-  if (env.ARIA2_ENABLED) {
+  if (useAria2) {
     args.push(
       "--downloader", "aria2c",
-      "--downloader-args", "aria2c:-x16 -s16 -k1M",
+      "--downloader-args", "aria2c:-x16 -s16 -k1M --connect-timeout=8 --timeout=8 --max-tries=3",
     );
+    if (youtube) args.push("--downloader", "dash,m3u8:native");
   }
-
-  return args;
+  return [...args, "--", url];
 }
 
-/**
- * Parse a single progress line from yt-dlp stderr.
- */
-function parseProgressLine(line: string): ProgressEvent | null {
+function emitProgress(line: string, onProgress: (event: ProgressEvent) => void): void {
   const match = line.match(PROGRESS_REGEX);
-  if (!match) return null;
-
-  return {
-    percent: parseFloat(match[1]),
-    speed: match[2],
-    eta: match[3],
-    downloaded: "",
-    total: "",
-  };
+  if (match) onProgress({
+    percent: Number(match[1]), speed: match[2], eta: match[3], downloaded: "", total: "",
+  });
 }
 
-/**
- * Pull the first meaningful line out of yt-dlp stderr so an unclassified
- * failure reports the real reason (proxy refused, extractor spoke, etc.)
- * instead of a generic "Download failed".
- */
-function firstMeaningfulErrorLine(stderr: string): string | null {
-  const line = stderr
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => l && !l.startsWith("[download]") && !l.startsWith("[youtube]") && !l.startsWith("WARNING"));
-  return line ? line.slice(0, 200) : null;
+function runCommand(args: string[], timeoutMs: number, onProgress?: (event: ProgressEvent) => void) {
+  if (timeoutMs <= 0) return Promise.reject(new DownloadError(DownloadErrorCode.TIMEOUT, "Download timed out"));
+
+  return new Promise<{ stdout: string; stderr: string; exitCode: number | null; timedOut: boolean }>((resolve, reject) => {
+    const processGroup = process.platform !== "win32";
+    const proc = spawn(args[0], args.slice(1), { detached: processGroup, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+
+    const capture = (stream: NonNullable<typeof proc.stdout>, append: (chunk: string) => void) => {
+      let lineBuffer = "";
+      stream.setEncoding("utf8").on("data", (chunk: string) => {
+        append(chunk);
+        if (!onProgress) return;
+        const lines = (lineBuffer + chunk).split(/[\r\n]+/);
+        lineBuffer = lines.pop() ?? "";
+        for (const line of lines) emitProgress(line, onProgress);
+      });
+    };
+    capture(proc.stdout!, (chunk) => { stdout += chunk; });
+    capture(proc.stderr!, (chunk) => { stderr = (stderr + chunk).slice(-8_000); });
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      try {
+        if (processGroup && proc.pid) process.kill(-proc.pid, "SIGKILL");
+        else proc.kill("SIGKILL");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ESRCH") logger.warn({ err }, "Could not stop media process");
+      }
+    }, timeoutMs);
+    proc.once("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+    proc.once("close", (exitCode) => {
+      clearTimeout(timeout);
+      resolve({ stdout, stderr, exitCode, timedOut });
+    });
+  });
 }
 
-/**
- * Check if yt-dlp stderr output indicates a known error.
- */
-function classifyYtDlpError(stderr: string): DownloadError {
-  const combined = stderr.toLowerCase();
-
-  if (combined.includes("private video") || combined.includes("private")) {
+export function classifyYtDlpError(stderr: string): DownloadError {
+  if (/private video|video is private/i.test(stderr)) {
     return new DownloadError(DownloadErrorCode.PRIVATE_VIDEO, "Video is private");
   }
-  if (combined.includes("copyright") || combined.includes("blocked") || combined.includes("removed")) {
+  if (/copyright|removed by|content blocked/i.test(stderr)) {
     return new DownloadError(DownloadErrorCode.PLATFORM_BLOCKED, "Content blocked by platform");
   }
-  if (combined.includes("geo") || combined.includes("not available in your country")) {
+  if (/geo.restricted|not available in your country/i.test(stderr)) {
     return new DownloadError(DownloadErrorCode.GEO_RESTRICTED, "Not available in your region");
   }
-  if (combined.includes("rate") || combined.includes("too many requests")) {
+  if (/rate.limit|too many requests|HTTP Error 429/i.test(stderr)) {
     return new DownloadError(DownloadErrorCode.RATE_LIMITED, "Rate limited, try again later");
   }
-  if (combined.includes("timed out") || combined.includes("timeout")) {
+  if (/timed out|timeout/i.test(stderr)) {
     return new DownloadError(DownloadErrorCode.TIMEOUT, "Download timed out");
   }
-  if (combined.includes("watermark")) {
+  if (/watermark/i.test(stderr)) {
     return new DownloadError(DownloadErrorCode.WATERMARK_DETECTED, "Video contains watermark");
   }
-  if (combined.includes("unsupported url") || combined.includes("no video") || combined.includes("no data")) {
-    return new DownloadError(DownloadErrorCode.EXTRACTOR_ERROR, "Could not extract video info");
+  if (/confirm you.re not a bot|sign in to confirm/i.test(stderr)) {
+    return new DownloadError(DownloadErrorCode.EXTRACTOR_ERROR, "YouTube blocked this connection with a sign-in check");
+  }
+  if (/unsupported url|no video|no data|requested format is not available/i.test(stderr)) {
+    return new DownloadError(DownloadErrorCode.EXTRACTOR_ERROR, "Could not extract the requested video format");
   }
 
-  return new DownloadError(DownloadErrorCode.UNKNOWN, firstMeaningfulErrorLine(stderr) || "Download failed");
+  const lines = stderr.split("\n").map((line) => line.trim()).filter(Boolean);
+  const error = lines.find((line) => line.startsWith("ERROR:")) || lines[0];
+  const safeError = error?.replace(/((?:https?|socks5h?):\/\/)[^\s/]+@/gi, "$1[redacted]@");
+  return new DownloadError(DownloadErrorCode.UNKNOWN, safeError?.slice(0, 200) || "Download failed");
 }
 
-/**
- * Sleep helper for retry backoff — uses Bun native timer.
- */
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+function routeFailure(stderr: string): boolean {
+  return /proxy (?:error|connection|authentication)|tunnel connection failed|unable to connect|connection (?:refused|reset|aborted)|network is unreachable|name resolution|remote end closed|timed out|HTTP Error (?:403|407|429|5\d\d)|confirm you.re not a bot|sign in to confirm|too many requests/i.test(stderr);
+}
 
-/**
- * Download a video using yt-dlp.
- *
- * @param url - The video URL to download
- * @param outputDir - Directory to write the file to
- * @param onProgress - Optional callback for progress updates
- * @param retryCount - Current retry attempt (internal)
- * @returns DownloadResult with file path and metadata
- */
+function canRetry(error: DownloadError, youtube: boolean): boolean {
+  if (!youtube) {
+    return [DownloadErrorCode.TIMEOUT, DownloadErrorCode.RATE_LIMITED, DownloadErrorCode.UNKNOWN].includes(error.code);
+  }
+  return ![
+    DownloadErrorCode.PRIVATE_VIDEO, DownloadErrorCode.PLATFORM_BLOCKED,
+    DownloadErrorCode.INVALID_URL, DownloadErrorCode.WATERMARK_DETECTED,
+  ].includes(error.code);
+}
+
+type MediaInfo = {
+  streams?: Array<{ codec_type: string; codec_name: string }>;
+  format?: { duration?: string };
+};
+
+async function probeMedia(path: string, deadline: number): Promise<MediaInfo> {
+  const result = await runCommand([
+    "ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name:format=duration",
+    "-of", "json", path,
+  ], Math.min(15_000, deadline - Date.now()));
+  if (result.timedOut) throw new DownloadError(DownloadErrorCode.TIMEOUT, "Verifying the video timed out");
+  if (result.exitCode !== 0) {
+    throw new DownloadError(DownloadErrorCode.INVALID_MEDIA, "Could not verify the downloaded video");
+  }
+  return JSON.parse(result.stdout) as MediaInfo;
+}
+
+function requireAudioAndVideo(info: MediaInfo) {
+  const video = info.streams?.find((stream) => stream.codec_type === "video");
+  const audio = info.streams?.find((stream) => stream.codec_type === "audio");
+  if (!video || !audio) {
+    throw new DownloadError(DownloadErrorCode.INVALID_MEDIA, "YouTube did not provide a complete video with audio");
+  }
+  return { video, audio };
+}
+
+async function prepareYoutubeVideo(path: string, outputStem: string, deadline: number) {
+  const info = await probeMedia(path, deadline);
+  const { video, audio } = requireAudioAndVideo(info);
+  if (path.endsWith(".mp4") && video.codec_name === "h264" && audio.codec_name === "aac") {
+    return { filePath: path, durationMs: Math.round((Number(info.format?.duration) || 0) * 1_000) };
+  }
+
+  const filePath = `${outputStem}.playable.mp4`;
+  const args = ["ffmpeg", "-nostdin", "-v", "error", "-xerror", "-y", "-i", path, "-map", "0:V:0", "-map", "0:a:0"];
+  if (video.codec_name === "h264") args.push("-c:v", "copy");
+  else args.push("-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p");
+  if (audio.codec_name === "aac") args.push("-c:a", "copy");
+  else args.push("-c:a", "aac", "-b:a", "128k");
+  const result = await runCommand([...args, "-movflags", "+faststart", filePath], deadline - Date.now());
+  if (result.timedOut) throw new DownloadError(DownloadErrorCode.TIMEOUT, "Preparing the video timed out");
+  if (result.exitCode !== 0) {
+    throw new DownloadError(DownloadErrorCode.INVALID_MEDIA, "Could not prepare an MP4 with playable sound");
+  }
+
+  const prepared = await probeMedia(filePath, deadline);
+  requireAudioAndVideo(prepared);
+  return { filePath, durationMs: Math.round((Number(prepared.format?.duration) || 0) * 1_000) };
+}
+
+async function cleanupAttempt(directory: string, videoId: string, keep?: string): Promise<void> {
+  try {
+    const names = await readdir(directory);
+    await Promise.all(names.filter((name) => name.startsWith(`${videoId}.`) && name !== keep)
+      .map((name) => unlink(join(directory, name))));
+  } catch (err) {
+    logger.warn({ err, videoId }, "Could not clean up download files");
+  }
+}
+
 export async function downloadVideo(
   url: string,
   outputDir: string,
@@ -161,334 +236,119 @@ export async function downloadVideo(
   formatCode?: string,
 ): Promise<DownloadResult> {
   const platform = detectPlatform(url);
-  const videoId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const ext = "mp4";
-  const outputPath = `${outputDir}/${videoId}.${ext}`;
+  const youtube = platform === "youtube";
+  const directory = resolve(outputDir);
+  await mkdir(directory, { recursive: true });
+  await ensureDiskFree(directory);
 
-  // Ensure temp directory exists, then verify the volume has free space
-  await mkdir(outputDir, { recursive: true });
-  await ensureDiskFree(outputDir);
+  const routes = getDownloadRoutes(platform);
+  if (!youtube) routes.push(...Array<DownloadRoute>(Math.max(0, MAX_DOWNLOAD_RETRIES - retryCount)).fill(routes[0]));
+  const deadline = Date.now() + DOWNLOAD_TIMEOUT_SECONDS * 1_000;
+  let lastError: DownloadError | undefined;
 
-  const args = buildYtDlpArgs({ url, outputPath, platform }, formatCode);
+  for (const [attempt, route] of routes.entries()) {
+    if (Date.now() >= deadline) break;
+    const videoId = crypto.randomUUID();
+    const stem = join(directory, videoId);
+    const outputPath = `${stem.replaceAll("%", "%%")}.%(ext)s`;
+    const useAria2 = env.ARIA2_ENABLED && route.kind === "direct" && !routes.slice(0, attempt).includes(route);
+    const args = buildYtDlpArgs({ url, outputPath, platform }, formatCode, route, useAria2);
+    let keep: string | undefined;
 
-  logger.info({ url: url.slice(0, 100), platform, outputPath, retryCount, formatCode }, "Starting download");
-
-  return new Promise<DownloadResult>((resolve, reject) => {
-    const proc = spawn(["yt-dlp", ...args], {
-      stderr: "pipe",
-      stdout: "pipe",
-    });
-
-    const stderrChunks: string[] = [];
-    let lastProgress: ProgressEvent | null = null;
-
-    // Read stderr for progress
-    const stderrReader = proc.stderr.getReader();
-    const readStderr = async () => {
-      const decoder = new TextDecoder();
-      let lineBuffer = "";
-      while (true) {
-        const { done, value } = await stderrReader.read();
-        if (done) {
-          if (lineBuffer.length > 0) {
-            const progress = parseProgressLine(lineBuffer);
-            if (progress) {
-              lastProgress = progress;
-              onProgress?.(progress);
-            }
-          }
-          break;
-        }
-        const text = decoder.decode(value, { stream: true });
-        stderrChunks.push(text);
-
-        lineBuffer += text;
-        const lines = lineBuffer.split("\n");
-        lineBuffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const progress = parseProgressLine(line);
-          if (progress) {
-            lastProgress = progress;
-            onProgress?.(progress);
-          }
-        }
-      }
-    };
-
-    // Read stdout (usually empty for yt-dlp)
-    const stdoutReader = proc.stdout.getReader();
-    const readStdout = async () => {
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await stdoutReader.read();
-        if (done) break;
-        // stdout from yt-dlp is minimal, just consume it
-        decoder.decode(value, { stream: true });
-      }
-    };
-
-    // Timeout
-    const timeoutId = setTimeout(() => {
-      try { proc.kill(); } catch { /* ignore */ }
-      reject(new DownloadError(DownloadErrorCode.TIMEOUT, `Download timed out after ${DOWNLOAD_TIMEOUT_SECONDS}s`));
-    }, DOWNLOAD_TIMEOUT_SECONDS * 1000);
-
-    // Wait for process
-    Promise.all([readStderr(), readStdout()]).then(async () => {
-      clearTimeout(timeoutId);
-      const exitCode = await proc.exited;
-
-      if (exitCode !== 0) {
-        const stderr = stderrChunks.join("");
-        const error = classifyYtDlpError(stderr);
-
-        logger.error(
-          { url: url.slice(0, 100), exitCode, errorCode: error.code, stderr: stderr.slice(0, 500), retryCount },
-          "Download failed",
-        );
-
-        // Retry logic for transient errors (with proxy rotation)
-        if (
-          retryCount < MAX_DOWNLOAD_RETRIES &&
-          (error.code === DownloadErrorCode.TIMEOUT ||
-           error.code === DownloadErrorCode.RATE_LIMITED ||
-           error.code === DownloadErrorCode.PLATFORM_BLOCKED ||
-           error.code === DownloadErrorCode.UNKNOWN)
-        ) {
-          // Report current proxy failure to cycle it
-          const currentProxy = getProxy();
-          if (currentProxy) {
-            reportFailure(currentProxy);
-          }
-
-          const delay = RETRY_DELAY_BASE_MS * Math.pow(2, retryCount);
-          logger.info({ retryCount, delay, proxyFailure: !!currentProxy }, "Retrying download");
-          await sleep(delay);
-          try {
-            const result = await downloadVideo(url, outputDir, onProgress, retryCount + 1, formatCode);
-            resolve(result);
-            return;
-          } catch (retryErr) {
-            reject(retryErr);
-            return;
-          }
-        }
-
-        reject(error);
-        return;
+    try {
+      logger.info({ platform, route: route.kind, attempt }, "Starting download");
+      const result = await runCommand(["yt-dlp", ...args], deadline - Date.now(), onProgress);
+      if (result.timedOut) throw new DownloadError(DownloadErrorCode.TIMEOUT, "Download timed out");
+      if (result.exitCode !== 0) {
+        if (routeFailure(result.stderr)) reportRouteFailure(route);
+        throw classifyYtDlpError(result.stderr);
       }
 
-      // Success — verify the file with Bun-native API.
-      // yt-dlp may append extensions when merging (e.g., .mkv), so search for the actual file.
-      let filePath = outputPath;
-      let bunFile = Bun.file(filePath);
-      let fileExists = await bunFile.exists();
-
-      if (!fileExists) {
-        // Search for any file starting with our output base name (without extension).
-        // yt-dlp may produce .mkv when ffmpeg cannot merge into mp4 (codec mismatch).
-        const { readdir } = await import("node:fs/promises");
-        try {
-          const dir = outputPath.substring(0, outputPath.lastIndexOf("/"));
-          const baseName = outputPath.substring(outputPath.lastIndexOf("/") + 1);
-          const prefix = baseName.includes(".") ? baseName.slice(0, baseName.lastIndexOf(".")) : baseName;
-          const files = await readdir(dir);
-          const match = files.find(f => f.startsWith(prefix));
-          if (match) {
-            filePath = `${dir}/${match}`;
-            bunFile = Bun.file(filePath);
-            fileExists = true;
-            logger.info({ expectedPath: outputPath, actualPath: filePath }, "Found merged output file (extension mismatch)");
-          }
-        } catch {}
+      const output = result.stdout.split("\n").find((line) => line.startsWith(OUTPUT_MARKER));
+      const path: unknown = output && JSON.parse(output.slice(OUTPUT_MARKER.length));
+      if (typeof path !== "string" || dirname(path) !== directory || !basename(path).startsWith(`${videoId}.`)) {
+        throw new DownloadError(DownloadErrorCode.INVALID_MEDIA, "Could not locate the finished video");
       }
 
-      if (!fileExists) {
-        reject(new DownloadError(DownloadErrorCode.UNKNOWN, "File not found after download completed"));
-        return;
-      }
-
-      const stat = await bunFile.stat();
-
-      // Extract format info
-      const dot = filePath.lastIndexOf(".");
-      const format = dot >= 0 ? filePath.slice(dot + 1) : "mp4";
-
-      logger.info(
-        { url: url.slice(0, 100), platform, fileSize: stat.size, format },
-        "Download completed",
-      );
-
-      resolve({
-        filePath,
-        fileSize: stat.size,
-        format,
-        durationMs: 0,
-        videoId,
-      });
-    }).catch(reject);
-  });
-}
-
-/**
- * List available formats for a URL using yt-dlp -F.
- * Returns unique resolutions up to 1080p with their format codes.
- */
-export async function listFormats(url: string, attempt = 0): Promise<FormatInfo[]> {
-  const platform = detectPlatform(url);
-  const MAX_ATTEMPTS = 3;
-
-  return new Promise((resolve) => {
-    const formatArgs = ["-F", url, "--no-playlist", "--no-cache-dir", "--no-warnings"];
-    if (shouldProxyPlatform(platform)) {
-      const proxy = getProxy();
-      if (proxy) {
-        formatArgs.push("--proxy", proxy);
-      } else if (isTorAvailable()) {
-        formatArgs.push(...getTorArgs());
-      }
+      const { filePath, durationMs } = youtube
+        ? await prepareYoutubeVideo(path, stem, deadline)
+        : { filePath: path, durationMs: 0 };
+      const { size: fileSize } = await stat(filePath);
+      if (!fileSize) throw new DownloadError(DownloadErrorCode.INVALID_MEDIA, "The finished video file is empty");
+      keep = basename(filePath);
+      const format = filePath.split(".").at(-1) || "mp4";
+      logger.info({ platform, route: route.kind, fileSize, format }, "Download completed");
+      return { filePath, fileSize, format, durationMs, videoId };
+    } catch (err) {
+      if (!(err instanceof DownloadError)) throw err;
+      lastError = err;
+      logger.warn({ platform, route: route.kind, attempt, errorCode: err.code, error: err.message }, "Download attempt failed");
+      if (!canRetry(err, youtube) || attempt === routes.length - 1) break;
+    } finally {
+      await cleanupAttempt(directory, videoId, keep);
     }
 
-    const proc = spawn(["yt-dlp", ...formatArgs], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-
-    const chunks: string[] = [];
-    const stdoutReader = proc.stdout.getReader();
-
-    const readStdout = async () => {
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await stdoutReader.read();
-        if (done) break;
-        chunks.push(decoder.decode(value, { stream: true }));
-      }
-    };
-
-    readStdout().then(async () => {
-      const exitCode = await proc.exited;
-      const output = chunks.join("");
-
-      if (exitCode !== 0 || !output.includes("Available formats")) {
-        if (exitCode !== 0) {
-          logger.warn({ url: url.slice(0, 100), exitCode, attempt }, "listFormats: yt-dlp exited with non-zero code");
-        } else {
-          logger.warn({ url: url.slice(0, 100), attempt }, "listFormats: output missing 'Available formats' marker");
-        }
-
-        if (attempt < MAX_ATTEMPTS - 1) {
-          const currentProxy = getProxy();
-          if (currentProxy) {
-            reportFailure(currentProxy);
-          }
-
-          const delay = RETRY_DELAY_BASE_MS * Math.pow(2, attempt);
-          logger.info({ attempt, delay, proxyFailure: !!currentProxy }, "Retrying listFormats");
-          await sleep(delay);
-          const formats = await listFormats(url, attempt + 1);
-          resolve(formats);
-          return;
-        }
-
-        resolve([]);
-        return;
-      }
-
-      const formats = parseFormats(output, platform);
-      resolve(formats);
-    }).catch(() => resolve([]));
-  });
-}
-
-/**
- * Parse yt-dlp -F output into a deduplicated list of resolutions ≤ 1080p.
- */
-function parseFormats(output: string, platform: string): FormatInfo[] {
-  const lines = output.split("\n");
-  const seen = new Map<number, FormatInfo>();
-
-  // Start parsing after the header line
-  let pastHeader = false;
-  for (const line of lines) {
-    if (!pastHeader) {
-      if (line.includes("Available formats")) pastHeader = true;
-      continue;
-    }
-
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    // Parse the format line — extract ID, EXT, and RESOLUTION
-    const fields = trimmed.split(/\s+/);
-    if (fields.length < 3) continue;
-
-    const code = fields[0];
-    const ext = fields[1];
-
-    // Skip non-video formats
-    if (code === "ID" || code.startsWith("sb")) continue;
-    if (ext === "mhtml" || ext === "m4a") continue;
-    if (ext === "webm") continue; // webm/VP9 can't merge into MP4
-    if (trimmed.includes("audio only")) continue;
-    if (trimmed.includes("images")) continue;
-    if (trimmed.includes("watermarked")) continue; // TikTok watermarked version
-
-    // Extract resolution
-    let height = 0;
-    let label = "";
-
-    // Try to parse resolution from format line like "1920x1080" or "576x1024"
-    const resMatch = trimmed.match(/(\d+)x(\d+)/);
-    if (resMatch) {
-      const w = parseInt(resMatch[1]);
-      const h = parseInt(resMatch[2]);
-      height = h;
-    }
-
-    // Also check for trailing resolution like "1080p" or "720p"
-    const pMatch = trimmed.match(/(\d+)p\b/);
-    if (pMatch) {
-      const p = parseInt(pMatch[1]);
-      if (!height) height = p;
-      label = `${p}p`;
-    }
-
-    // Skip if no resolution found or height > 1080
-    if (!height || height > 1080) continue;
-
-    // Build label
-    if (!label) {
-      if (height === 1080) label = "1080p";
-      else if (height >= 720) label = "720p";
-      else if (height >= 480) label = "480p";
-      else if (height >= 360) label = "360p";
-      else label = `${height}p`;
-    }
-
-    // Prefer combined (audio+video) over merged DASH formats for YouTube
-    const existing = seen.get(height);
-    const isYoutube = platform === "youtube";
-    const hasAudio = isYoutube && ext === "mp4" && !trimmed.includes("video only");
-
-    if (!existing || (hasAudio && existing.code.includes("+"))) {
-      // Only append +bestaudio[ext=m4a] for YouTube video-only formats. TikTok/Instagram/etc already include audio.
-      const formatCode = hasAudio ? code : (isYoutube ? `${code}+bestaudio[ext=m4a]` : code);
-      seen.set(height, {
-        code: formatCode,
-        resolution: label,
-        height,
-        filesize: "",
-      });
+    if (!youtube) {
+      const delay = Math.min(RETRY_DELAY_BASE_MS * 2 ** attempt, deadline - Date.now());
+      if (delay > 0) await Bun.sleep(delay);
     }
   }
 
-  // Sort by height descending, take unique resolutions
-  const formats = Array.from(seen.values())
-    .sort((a, b) => b.height - a.height)
-    .filter((f, i, arr) => arr.findIndex(x => x.height === f.height) === i);
+  throw lastError ?? new DownloadError(DownloadErrorCode.TIMEOUT, "Download timed out");
+}
 
-  // Limit to max 6 options
-  return formats.slice(0, 6);
+interface ListedFormat {
+  format_id?: string;
+  height?: number;
+  vcodec?: string;
+  ext?: string;
+  format_note?: string;
+}
+
+function parseFormats(stdout: string, platform: string): FormatInfo[] {
+  const data = JSON.parse(stdout) as { formats?: ListedFormat[] };
+  const formats = new Map<number, FormatInfo>();
+  for (const format of data.formats ?? []) {
+    const height = format.height;
+    const code = format.format_id;
+    if (!height || !Number.isInteger(height) || height < 1 || height > 1080 || !code ||
+        !format.vcodec || format.vcodec === "none" || /watermarked/i.test(format.format_note ?? "")) continue;
+
+    if (platform !== "youtube" && format.ext === "webm") continue;
+
+    formats.set(height, {
+      code: platform === "youtube" ? youtubeFormat(height) : code,
+      resolution: `${height}p`,
+      height,
+      filesize: "",
+    });
+  }
+  return [...formats.values()].sort((a, b) => b.height - a.height).slice(0, 6);
+}
+
+export async function listFormats(url: string): Promise<FormatInfo[]> {
+  const platform = detectPlatform(url);
+  for (const route of getDownloadRoutes(platform)) {
+    try {
+      const result = await runCommand([
+        "yt-dlp", ...commonArgs(platform, route.proxy),
+        "--dump-single-json", "--skip-download", "--retries", "1", "--extractor-retries", "1", "--", url,
+      ], LIST_TIMEOUT_MS);
+
+      if (result.exitCode === 0) {
+        const formats = parseFormats(result.stdout, platform);
+        if (formats.length) return formats;
+      } else {
+        const error = classifyYtDlpError(result.stderr);
+        if (result.timedOut || routeFailure(result.stderr)) reportRouteFailure(route);
+        logger.warn({ platform, route: route.kind, errorCode: error.code }, "Format lookup failed");
+        if (!canRetry(error, platform === "youtube")) return [];
+      }
+    } catch (err) {
+      logger.warn({ platform, route: route.kind, err }, "Could not list formats");
+      return [];
+    }
+  }
+
+  return [];
 }

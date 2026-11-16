@@ -20,16 +20,21 @@ services:
       - ALLOWED_USERS=${ALLOWED_USERS:-}
       - ALLOWED_GROUPS=${ALLOWED_GROUPS:-}
       - TEMP_DIR=/tmp/bun-video-bot
-      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      - DOWNLOAD_TIMEOUT_SECONDS=${DOWNLOAD_TIMEOUT_SECONDS:-3600}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - PROXY_URL=${PROXY_URL:-}
       - PROXY_ENABLED=${PROXY_ENABLED:-true}
       - TOR_ENABLED=${TOR_ENABLED:-true}
+      - TOR_PROXY_URL=${TOR_PROXY_URL:-socks5h://127.0.0.1:9050}
+      - ARIA2_ENABLED=${ARIA2_ENABLED:-false}
+      - SHAREBOX_URL=${SHAREBOX_URL:-}
+      - SHAREBOX_PUBLIC_URL=${SHAREBOX_PUBLIC_URL:-}
+      - SHAREBOX_MIN_SIZE_MB=${SHAREBOX_MIN_SIZE_MB:-49.99}
+      - SHAREBOX_TOKEN=${SHAREBOX_TOKEN:-}
       - DATABASE_PATH=/app/data/bot.db
       - NODE_ENV=production
     volumes:
       - ./data:/app/data
-      - /tmp/bun-video-bot:/tmp/bun-video-bot
     healthcheck:
       test: ["CMD-SHELL", "bun --eval \"process.exit(0)\" || exit 1"]
       interval: 30s

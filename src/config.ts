@@ -36,7 +36,7 @@ export const envSchema = z.object({
     .enum(["development", "production", "test"])
     .default("development"),
 
-  PROXY_URL: z.string().optional(),
+  PROXY_URL: z.string().trim().optional(),
 
   PROXY_ENABLED: z
     .string()
@@ -47,6 +47,10 @@ export const envSchema = z.object({
     .string()
     .default("true")
     .transform((v) => v === "true" || v === "1"),
+
+  TOR_PROXY_URL: z.string().trim().url()
+    .refine((value) => /^socks5h?:\/\//i.test(value), "Tor proxy must use socks5 or socks5h")
+    .default("socks5h://127.0.0.1:9050"),
 
   // Use aria2c as yt-dlp's external downloader for faster, multi-connection
   // transfers. yt-dlp still handles extraction/format selection — aria2 only

@@ -1,6 +1,8 @@
 # =============================================================================
 # Hermes Video Bot — Multi-stage Dockerfile
 # =============================================================================
+FROM denoland/deno:bin-2.6.10 AS deno
+
 # Stage 1: Bun install (dependencies only, cached layer)
 FROM oven/bun:1.3 AS deps
 
@@ -30,7 +32,8 @@ LABEL org.opencontainers.image.title="Hermes Video Bot"
 LABEL org.opencontainers.image.description="Telegram video downloader bot"
 LABEL org.opencontainers.image.version="1.0.0"
 
-# Install system dependencies: yt-dlp and FFmpeg
+# Install yt-dlp, its YouTube challenge solver, and the media tools
+COPY --from=deno /deno /usr/local/bin/deno
 RUN apt-get update -qq && \
     apt-get install -y -qq \
         ffmpeg \
@@ -41,12 +44,12 @@ RUN apt-get update -qq && \
         tor \
         aria2 \
         --no-install-recommends && \
-    pip3 install --no-cache-dir --break-system-packages yt-dlp && \
+    pip3 install --no-cache-dir --break-system-packages "yt-dlp[default]" && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Verify installations
-RUN yt-dlp --version && ffmpeg -version | head -1 && aria2c --version | head -1
+RUN deno --version && yt-dlp --version && python3 -c "import yt_dlp_ejs" && ffmpeg -version && aria2c --version
 
 WORKDIR /app
 

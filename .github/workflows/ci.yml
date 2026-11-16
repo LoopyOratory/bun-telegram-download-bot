@@ -88,18 +88,17 @@ jobs:
 
       - name: Test Docker image (smoke test)
         run: |
-          docker run --rm \
-            -e BOT_TOKEN=${{ env.BOT_TOKEN }} \
-            -e OWNER_ID=${{ env.OWNER_ID }} \
-            -e ALLOWED_USERS=${{ env.ALLOWED_USERS }} \
-            -e ALLOWED_GROUPS=${{ env.ALLOWED_GROUPS }} \
-            -e NODE_ENV=test \
-            bun-video-bot:ci \
-            bun --eval "
-              import('./src/config.ts').then(c => {
-                if (c.env.BOT_TOKEN) process.exit(0)
-              }).catch(e => { console.error(e); process.exit(1) })
-            " || echo "Container smoke test skipped (needs bg) — image built OK"
+          docker run --rm --entrypoint sh \
+            -e BOT_TOKEN \
+            -e OWNER_ID \
+            -e NODE_ENV \
+            bun-video-bot:ci -ec '
+              deno --version
+              yt-dlp --version
+              python3 -c "import yt_dlp_ejs"
+              ffprobe -version
+              bun --eval "await import(\"./src/config.ts\")"
+            '
 
   # Optional: deploy to Haloy / your container host
   # deploy:

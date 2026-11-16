@@ -18,11 +18,13 @@ import type { Bot, Context } from "grammy";
  */
 const lastEditTime = new Map<number, number>();
 
-/**
- * In-memory store of pending format selections: callback data → { url, chatId, formats }
- * Keyed by a random ID passed in the callback data.
- */
-const pendingSelections = new Map<string, { url: string; chatId: number; formats: FormatInfo[]; statusMsgId: number }>();
+const SELECTION_TTL_MS = 10 * 60 * 1_000;
+const pendingSelections = new Map<string, {
+  url: string;
+  chatId: number;
+  formats: FormatInfo[];
+  statusMsgId: number;
+}>();
 
 /**
  * Upload a downloaded file to the configured FileCodeBox and return the share
@@ -148,25 +150,13 @@ export async function handleDownload(ctx: Context): Promise<void> {
 
   // Show resolution selection buttons
   const keyboard = new InlineKeyboard();
-  for (const fmt of formats) {
-    const selectionId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    pendingSelections.set(selectionId, {
-      url: cleanedUrl,
-      chatId,
-      formats,
-      statusMsgId: statusMsg.message_id,
-    });
-    keyboard.text(fmt.resolution, `res:${selectionId}:${fmt.code}`).row();
+  const selectionId = crypto.randomUUID();
+  pendingSelections.set(selectionId, { url: cleanedUrl, chatId, formats, statusMsgId: statusMsg.message_id });
+  setTimeout(() => pendingSelections.delete(selectionId), SELECTION_TTL_MS).unref();
+  for (const [index, format] of formats.entries()) {
+    keyboard.text(format.resolution, `res:${selectionId}:${index}`).row();
   }
-  // Add a "Best" button
-  const bestId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  pendingSelections.set(bestId, {
-    url: cleanedUrl,
-    chatId,
-    formats,
-    statusMsgId: statusMsg.message_id,
-  });
-  keyboard.text("⚡ Best", `res:${bestId}:best`);
+  keyboard.text("⚡ Best", `res:${selectionId}:best`);
 
   await ctx.api.editMessageText(
     chatId,
@@ -201,8 +191,6 @@ async function doDownload(
   let uploadedPath: string | null = null;
 
   try {
-    const platform = detectPlatform(cleanedUrl);
-
     // Download with progress
     result = await downloadVideo(
       cleanedUrl,
@@ -221,57 +209,50 @@ async function doDownload(
       formatCode,
     );
 
-    await ctx.api.editMessageText(chatId, statusMsgId, "🧩 Merging streams...");
-
-    if (env.SHAREBOX_URL && result.fileSize > env.SHAREBOX_MIN_SIZE_MB * 1024 * 1024) {
-      // Over the configured share threshold — upload to the file box and hand
-      // the user a link + passcode (original quality, no encode wait).
+    const sendShare = async (download: DownloadResult) => {
       await ctx.api.editMessageText(chatId, statusMsgId, "📦 Uploading to File Box…").catch(() => {});
-      const share = await shareViaBox(result.filePath, (done, total) => {
-        ctx.api
-          .editMessageText(chatId, statusMsgId, `📦 Uploading to File Box… ${done}/${total}`)
-          .catch(() => {});
+      const share = await shareViaBox(download.filePath, (done, total) => {
+        ctx.api.editMessageText(chatId, statusMsgId, `📦 Uploading to File Box… ${done}/${total}`).catch(() => {});
       });
       await ctx.api.editMessageText(
         chatId,
         statusMsgId,
-        `📎 **File too large for Telegram** (${(result.fileSize / 1024 / 1024).toFixed(0)} MB).\n\n` +
-          `📦 Grab it here: ${share.link}\n` +
-          `🔑 Passcode: \`${share.code}\`\n\n` +
-          `Expires in 2 hours.`,
+        `📦 Download: ${share.link}\n🔑 Passcode: ${share.code}\n\nExpires in 2 hours.`,
       );
-      await tracker.trackComplete(downloadId, result.fileSize, result.format, userId);
-      return;
-    }
+    };
 
-    uploadedPath = result.filePath;
-    try {
-      await sendVideoWithProgress(ctx, chatId, statusMsgId, uploadedPath, result.fileSize);
-    } catch (err) {
-      if (!(err instanceof GrammyError && err.error_code === 413)) throw err;
-      if (env.SHAREBOX_URL) {
-        await ctx.api.editMessageText(chatId, statusMsgId, "📦 Uploading to File Box…").catch(() => {});
-        const share = await shareViaBox(result.filePath, (done, total) => {
-          ctx.api
-            .editMessageText(chatId, statusMsgId, `📦 Uploading to File Box… ${done}/${total}`)
-            .catch(() => {});
-        });
-        await ctx.api.editMessageText(
-          chatId,
-          statusMsgId,
-          `📎 **File too large for Telegram.**\n\n📦 Grab it here: ${share.link}\n🔑 Passcode: \`${share.code}\``,
-        );
-      } else {
-        await ctx.api
-          .editMessageText(chatId, statusMsgId, "📦 Over Telegram's 50MB upload limit — compressing…")
-          .catch(() => {});
-        uploadedPath = await compressVideo(result.filePath, `${result.filePath}.small.mp4`);
-        const compressedSize = Bun.file(uploadedPath).size;
-        await sendVideoWithProgress(ctx, chatId, statusMsgId, uploadedPath, compressedSize);
+    const compressAndSend = async (download: DownloadResult) => {
+      await ctx.api.editMessageText(chatId, statusMsgId, "📦 Over Telegram's 50MB upload limit — compressing…").catch(() => {});
+      uploadedPath = await compressVideo(download.filePath, `${download.filePath}.small.mp4`);
+      await sendVideoWithProgress(ctx, chatId, statusMsgId, uploadedPath, Bun.file(uploadedPath).size);
+    };
+
+    const overInlineLimit = result.fileSize > 50 * 1024 * 1024;
+    const useShareBox = env.SHAREBOX_URL &&
+      (overInlineLimit || result.fileSize >= env.SHAREBOX_MIN_SIZE_MB * 1024 * 1024);
+    let shared = false;
+
+    if (useShareBox) {
+      await sendShare(result);
+      shared = true;
+    } else if (overInlineLimit) {
+      await compressAndSend(result);
+    } else {
+      try {
+        await sendVideoWithProgress(ctx, chatId, statusMsgId, result.filePath, result.fileSize);
+      } catch (err) {
+        if (!(err instanceof GrammyError &&
+          (err.error_code === 413 || (err.error_code === 400 && /file is too big/i.test(err.description))))) throw err;
+        if (env.SHAREBOX_URL) {
+          await sendShare(result);
+          shared = true;
+        } else {
+          await compressAndSend(result);
+        }
       }
     }
 
-    await ctx.api.editMessageText(chatId, statusMsgId, "✅ Done!");
+    if (!shared) await ctx.api.editMessageText(chatId, statusMsgId, "✅ Done!").catch(() => {});
     await tracker.trackComplete(downloadId, result.fileSize, result.format, userId);
   } catch (err) {
     const downloadErr =
@@ -306,34 +287,34 @@ export async function handleResolutionCallback(ctx: Context): Promise<void> {
   const callbackData = ctx.callbackQuery?.data;
   if (!callbackData || !callbackData.startsWith("res:")) return;
 
-  await ctx.answerCallbackQuery();
-
-  const parts = callbackData.split(":");
-  if (parts.length < 3) return;
-
-  const selectionId = parts[1];
-  const formatCode = parts[2];
-
+  const [, selectionId, choice] = callbackData.split(":");
   const pending = pendingSelections.get(selectionId);
   if (!pending) {
-    await ctx.editMessageText("⌛ This selection has expired. Please send the URL again.");
+    await ctx.answerCallbackQuery({ text: "This selection is no longer available. Send the URL again." });
     return;
   }
 
-  const { url, chatId, statusMsgId } = pending;
+  const { url, chatId, formats, statusMsgId } = pending;
+  if (ctx.chat?.id !== chatId || ctx.callbackQuery?.message?.message_id !== statusMsgId) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
 
-  // Clean up pending selection
+  const format = /^\d+$/.test(choice ?? "") ? formats[Number(choice)] : undefined;
+  if (choice !== "best" && !format) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
   pendingSelections.delete(selectionId);
+  await ctx.answerCallbackQuery().catch(() => {});
 
-  // Remove the keyboard from the selection message
   await ctx.api.editMessageText(
     chatId,
     statusMsgId,
-    `📥 Downloading (${formatCode === "best" ? "best quality" : formatCode})...`,
+    `📥 Downloading (${format?.resolution ?? "best quality"})...`,
   );
 
-  // Clone context-like behaviour — use the chatId from the pending selection
-  await doDownload(ctx, url, ctx.from!.id, chatId, statusMsgId, formatCode === "best" ? undefined : formatCode);
+  await doDownload(ctx, url, ctx.from!.id, chatId, statusMsgId, format?.code);
 }
 
 /**
